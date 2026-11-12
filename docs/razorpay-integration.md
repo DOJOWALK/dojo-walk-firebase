@@ -10,7 +10,7 @@ The callable reads a trusted server-side document:
 - `bookingPricing/45`
 - `bookingPricing/60`
 
-Each document must be explicitly configured by an administrator:
+Missing pricing documents are returned to the admin dashboard as ₹0. New installations therefore start with all three durations at ₹0 / disabled. Each document must be configured by an administrator before that duration can accept payment:
 
 ```json
 {
@@ -21,7 +21,7 @@ Each document must be explicitly configured by an administrator:
 }
 ```
 
-Replace `0` with the actual agreed price in paise before enabling the duration. For example, ₹X is stored as X × 100 paise. The example is a schema only; no DOJO WALK prices have been assumed. If a document is missing, inactive, or has an invalid amount, order creation fails closed. Do not accept price or amount from the mobile client.
+Replace `0` with the actual agreed price in paise before enabling the duration. The Admin Panel writes these documents through admin-only `setBookingPricing`; `getBookingPricing` reads the current values. Prices are entered in rupees in the dashboard and stored as integer paise. Saving ₹0 sets `active: false`. If a document is missing, inactive, zero, or has an invalid amount, order creation fails closed. Do not accept price or amount from the mobile client.
 
 Keep pricing documents writable only by trusted admin/server processes. The existing Firestore catch-all deny rule blocks client writes.
 
