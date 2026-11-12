@@ -544,6 +544,9 @@ export const createRazorpayOrder = onCall(
             reservation_id: booking.reservationId,
           },
         });
+      if (order.amount !== amountPaise || order.currency !== currency || order.status !== 'created') {
+        throw new Error('Razorpay order response did not match the server price.');
+      }
     } catch (_) {
       await db.runTransaction(async (tx) => {
         const fresh = await tx.get(bookingRef);
@@ -662,8 +665,9 @@ export const razorpayWebhook = onRequest(
       response.status(400).send('Missing payment entity');
       return;
     }
-    const eventId = request.header('x-razorpay-event-id')
-      ?? createHash('sha256').update(rawBody).digest('hex');
+    const eventId = createHash('sha256')
+      .update(request.header('x-razorpay-event-id') ?? rawBody)
+      .digest('hex');
     const eventRef = db.collection('razorpayWebhookEvents').doc(eventId);
 
     try {
@@ -700,4 +704,25 @@ export const razorpayWebhook = onRequest(
     }
   },
 );
+
+export const getBookingPaymentStatus = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in to view booking status.');
+  }
+  const bookingId = request.data?.bookingId;
+  if (typeof bookingId !== 'string' || !/^[A-Za-z0-9]{1,128}$/.test(bookingId)) {
+    throw new HttpsError('invalid-argument', 'A valid booking ID is required.');
+  }
+  const snap = await db.collection('bookings').doc(bookingId).get();
+  if (!snap.exists || snap.data()?.customerId !== request.auth.uid) {
+    throw new HttpsError('not-found', 'Booking request was not found.');
+  }
+  const booking = snap.data()!;
+  return {
+    bookingId,
+    status: booking.status,
+    paymentStatus: booking.paymentStatus,
+    paymentReviewRequired: booking.paymentReviewRequired === true,
+  };
+});
 
