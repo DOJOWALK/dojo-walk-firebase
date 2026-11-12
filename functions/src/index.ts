@@ -323,6 +323,13 @@ type RazorpayPayment = {
   created_at?: number;
 };
 
+type RazorpayOrder = {
+  id: string;
+  amount: number;
+  currency: string;
+  status: string;
+};
+
 function safeHexEqual(expected: string, received: string): boolean {
   if (!/^[a-f0-9]{64}$/i.test(received)) return false;
   const left = Buffer.from(expected, 'hex');
@@ -354,6 +361,27 @@ async function razorpayApi<T>(
     throw new Error(result.error?.description ?? ('Razorpay API returned ' + response.status));
   }
   return result;
+}
+
+async function fetchVerifiedCapturedPayment(
+  orderId: string,
+  paymentId: string,
+  keyId: string,
+  keySecret: string,
+): Promise<RazorpayPayment> {
+  const [payment, order] = await Promise.all([
+    razorpayApi<RazorpayPayment>('/payments/' + encodeURIComponent(paymentId),
+      keyId, keySecret, 'GET'),
+    razorpayApi<RazorpayOrder>('/orders/' + encodeURIComponent(orderId),
+      keyId, keySecret, 'GET'),
+  ]);
+  if (payment.order_id !== orderId || payment.status !== 'captured'
+      || payment.captured !== true || order.id !== orderId
+      || order.status !== 'paid' || payment.amount !== order.amount
+      || payment.currency !== order.currency || order.currency !== 'INR') {
+    throw new Error('Razorpay order/payment is not in a captured and paid state.');
+  }
+  return payment;
 }
 
 async function finalizeCapturedRazorpayPayment(
@@ -638,8 +666,9 @@ export const verifyRazorpayCheckout = onCall(
     }
     let payment: RazorpayPayment;
     try {
-      payment = await razorpayApi('/payments/' + encodeURIComponent(paymentId),
-        RAZORPAY_KEY_ID.value(), RAZORPAY_KEY_SECRET.value(), 'GET');
+      payment = await fetchVerifiedCapturedPayment(
+        orderId, paymentId, RAZORPAY_KEY_ID.value(), RAZORPAY_KEY_SECRET.value(),
+      );
     } catch (_) {
       throw new HttpsError('unavailable', 'Could not verify payment status with Razorpay.');
     }
@@ -701,13 +730,9 @@ export const razorpayWebhook = onRequest(
         response.status(200).send('Duplicate event acknowledged');
         return;
       }
-      const payment = await razorpayApi('/payments/' + encodeURIComponent(entity.id),
-        RAZORPAY_KEY_ID.value(), RAZORPAY_KEY_SECRET.value(), 'GET') as RazorpayPayment;
-      if (payment.status !== 'captured' || payment.captured !== true
-          || payment.order_id !== entity.order_id) {
-        response.status(400).send('Payment is not captured');
-        return;
-      }
+      const payment = await fetchVerifiedCapturedPayment(
+        entity.order_id, entity.id, RAZORPAY_KEY_ID.value(), RAZORPAY_KEY_SECRET.value(),
+      );
       const bookings = await db.collection('bookings')
         .where('razorpayOrderId', '==', payment.order_id)
         .limit(1).get();
