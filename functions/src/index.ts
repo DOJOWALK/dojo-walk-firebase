@@ -385,6 +385,26 @@ async function finalizeCapturedRazorpayPayment(
     }
 
     const now = Timestamp.now();
+    if (booking.paymentStatus === 'paid' || booking.status === 'confirmed') {
+      tx.create(paymentRef, {
+        bookingId,
+        razorpayOrderId: payment.order_id,
+        amountPaise: payment.amount,
+        currency: payment.currency,
+        status: 'captured_duplicate_review',
+        source,
+        capturedAt: payment.created_at
+          ? Timestamp.fromMillis(payment.created_at * 1000)
+          : now,
+        recordedAt: now,
+      });
+      tx.update(bookingRef, {
+        paymentReviewRequired: true,
+        paymentReviewReason: 'An additional captured payment needs refund review.',
+        updatedAt: now,
+      });
+      return { status: 'duplicate_payment_review', bookingId };
+    }
     const reservationRef = typeof booking.walkerId === 'string'
       && typeof booking.reservationId === 'string'
       ? db.collection('walkers').doc(booking.walkerId)
@@ -479,6 +499,9 @@ export const createRazorpayOrder = onCall(
     if (booking.paymentOrderStatus === 'creating') {
       throw new HttpsError('aborted', 'Payment order creation is already in progress. Please retry shortly.');
     }
+    if (booking.paymentOrderStatus === 'reconciliation_required') {
+      throw new HttpsError('failed-precondition', 'Payment order outcome needs admin reconciliation. Do not retry payment yet.');
+    }
     if (booking.paymentStatus === 'paid') {
       throw new HttpsError('already-exists', 'This booking has already been paid.');
     }
@@ -548,17 +571,19 @@ export const createRazorpayOrder = onCall(
         throw new Error('Razorpay order response did not match the server price.');
       }
     } catch (_) {
+      // The network may fail after Razorpay has accepted the order. Keep a
+      // reconciliation lock so a client retry cannot accidentally create a second order.
       await db.runTransaction(async (tx) => {
         const fresh = await tx.get(bookingRef);
         if (fresh.exists && fresh.data()?.paymentOrderLockId === lockId) {
           tx.update(bookingRef, {
-            paymentOrderStatus: 'failed',
+            paymentOrderStatus: 'reconciliation_required',
             paymentOrderErrorAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           });
         }
       });
-      throw new HttpsError('unavailable', 'Razorpay could not create the payment order. Please retry.');
+      throw new HttpsError('failed-precondition', 'Payment order outcome is uncertain. Do not retry; support must reconcile the Razorpay order.');
     }
 
     await db.runTransaction(async (tx) => {
