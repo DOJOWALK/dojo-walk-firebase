@@ -5,6 +5,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 initializeApp();
 const db = getFirestore();
 const allowedDurations = new Set([30, 45, 60]);
+const launchCities = new Set(['Noida', 'Greater Noida', 'Ghaziabad']);
 
 export const createBookingDraft = onCall(async (request) => {
   if (!request.auth) {
@@ -12,10 +13,13 @@ export const createBookingDraft = onCall(async (request) => {
   }
 
   const data = request.data ?? {};
-  const { durationMinutes, scheduledAt, address, petName } = data;
+  const { durationMinutes, scheduledAt, address, petName, city } = data;
 
   if (!Number.isInteger(durationMinutes) || !allowedDurations.has(durationMinutes)) {
     throw new HttpsError('invalid-argument', 'Duration must be 30, 45, or 60 minutes.');
+  }
+  if (typeof city !== 'string' || !launchCities.has(city)) {
+    throw new HttpsError('failed-precondition', 'This city is not in the initial launch area.');
   }
   if (typeof address !== 'string' || !address.trim() || address.trim().length > 500) {
     throw new HttpsError('invalid-argument', 'Provide a walk address (up to 500 characters).');
@@ -34,6 +38,7 @@ export const createBookingDraft = onCall(async (request) => {
 
   const ref = await db.collection('bookings').add({
     customerId: request.auth.uid,
+    city,
     durationMinutes,
     address: address.trim(),
     petName: petName.trim(),
@@ -46,5 +51,6 @@ export const createBookingDraft = onCall(async (request) => {
   return { bookingId: ref.id, status: 'draft' };
 });
 
-// TODO: Add server-created payment orders and signed webhook verification.
+// TODO: Add precise address/pincode serviceability checks, walker assignment,
+// server-created payment orders and signed payment webhook verification.
 // Never accept a client-supplied "paid" flag or payment status.
