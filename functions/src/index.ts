@@ -127,7 +127,36 @@ export const reserveWalkerForBooking = onCall(async (request) => {
   if (!bookingSnap.exists || bookingSnap.data()?.customerId !== request.auth.uid) {
     throw new HttpsError('not-found', 'Booking request was not found.');
   }
-  const booking = bookingSnap.data()!;
+  let booking = bookingSnap.data()!;
+  if (booking.status === 'walker_held'
+      && booking.reservationExpiresAt instanceof Timestamp
+      && booking.reservationExpiresAt.toMillis() <= Date.now()
+      && typeof booking.walkerId === 'string'
+      && typeof booking.reservationId === 'string') {
+    await db.runTransaction(async (tx) => {
+      const fresh = await tx.get(bookingRef);
+      if (!fresh.exists) throw new HttpsError('not-found', 'Booking request was not found.');
+      const current = fresh.data()!;
+      if (current.status !== 'walker_held'
+          || !(current.reservationExpiresAt instanceof Timestamp)
+          || current.reservationExpiresAt.toMillis() > Date.now()) return;
+      const oldReservationRef = db.collection('walkers').doc(current.walkerId)
+        .collection('reservations').doc(current.reservationId);
+      const oldReservation = await tx.get(oldReservationRef);
+      if (oldReservation.exists && oldReservation.data()?.status === 'held') {
+        tx.update(oldReservationRef, { status: 'expired', expiredAt: Timestamp.now() });
+      }
+      tx.update(bookingRef, {
+        status: 'draft',
+        walkerId: null,
+        reservationId: null,
+        reservationExpiresAt: null,
+        updatedAt: Timestamp.now(),
+      });
+    });
+    const refreshed = await bookingRef.get();
+    booking = refreshed.data()!;
+  }
   if (booking.status !== 'draft' || !(booking.scheduledAt instanceof Timestamp)
       || !(booking.endsAt instanceof Timestamp) || !Array.isArray(booking.eligibleWalkerIds)) {
     throw new HttpsError('failed-precondition', 'This booking is not ready for walker reservation.');
