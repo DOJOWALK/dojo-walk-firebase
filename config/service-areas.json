@@ -1,0 +1,14 @@
+{
+  "phase": "initial_ncr_launch",
+  "status": "planned_not_yet_live",
+  "cities": [
+    { "id": "noida", "name": "Noida", "enabledForBookingDrafts": true },
+    { "id": "greater-noida", "name": "Greater Noida", "enabledForBookingDrafts": true },
+    { "id": "ghaziabad", "name": "Ghaziabad", "enabledForBookingDrafts": true }
+  ],
+  "serviceability": {
+    "requiresExactAddressCheck": true,
+    "coveragePolygonsConfigured": false,
+    "note": "City selection is not confirmation of service at a specific address. Add verified pincodes or geofences before accepting paid bookings."
+  }
+}
