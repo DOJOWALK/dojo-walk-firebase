@@ -1,6 +1,8 @@
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
-import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
+import { defineSecret } from 'firebase-functions/params';
+import { createHmac, createHash, timingSafeEqual } from 'node:crypto';
 
 initializeApp();
 const db = getFirestore();
@@ -305,3 +307,397 @@ export const releaseWalkerHold = onCall(async (request) => {
   });
   return { bookingId, status: 'draft', walkerReleased: true };
 });
+
+const RAZORPAY_KEY_ID = defineSecret('RAZORPAY_KEY_ID');
+const RAZORPAY_KEY_SECRET = defineSecret('RAZORPAY_KEY_SECRET');
+const RAZORPAY_WEBHOOK_SECRET = defineSecret('RAZORPAY_WEBHOOK_SECRET');
+const PAYMENT_WINDOW_MINUTES = 15;
+
+type RazorpayPayment = {
+  id: string;
+  order_id: string;
+  amount: number;
+  currency: string;
+  status: string;
+  captured?: boolean;
+  created_at?: number;
+};
+
+function safeHexEqual(expected: string, received: string): boolean {
+  if (!/^[a-f0-9]{64}$/i.test(received)) return false;
+  const left = Buffer.from(expected, 'hex');
+  const right = Buffer.from(received, 'hex');
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function hmacHex(secret: string, message: string): string {
+  return createHmac('sha256', secret).update(message).digest('hex');
+}
+
+async function razorpayApi<T>(
+  path: string,
+  keyId: string,
+  keySecret: string,
+  method: 'GET' | 'POST',
+  body?: Record<string, unknown>,
+): Promise<T> {
+  const response = await fetch('https://api.razorpay.com/v1' + path, {
+    method,
+    headers: {
+      Authorization: 'Basic ' + Buffer.from(keyId + ':' + keySecret).toString('base64'),
+      'Content-Type': 'application/json',
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const result = await response.json() as T & { error?: { description?: string } };
+  if (!response.ok) {
+    throw new Error(result.error?.description ?? ('Razorpay API returned ' + response.status));
+  }
+  return result;
+}
+
+async function finalizeCapturedRazorpayPayment(
+  bookingId: string,
+  payment: RazorpayPayment,
+  source: 'checkout' | 'webhook',
+): Promise<{ status: string; bookingId: string }> {
+  const bookingRef = db.collection('bookings').doc(bookingId);
+  const paymentRef = db.collection('razorpayPayments').doc(payment.id);
+  return db.runTransaction(async (tx) => {
+    const [bookingSnap, paymentSnap] = await Promise.all([
+      tx.get(bookingRef),
+      tx.get(paymentRef),
+    ]);
+    if (!bookingSnap.exists) throw new Error('Booking does not exist.');
+    const booking = bookingSnap.data()!;
+    if (paymentSnap.exists) {
+      if (paymentSnap.data()?.bookingId !== bookingId) {
+        throw new Error('Payment ID is already linked to another booking.');
+      }
+      return { status: booking.status, bookingId };
+    }
+    if (booking.razorpayOrderId !== payment.order_id
+        || booking.razorpayAmountPaise !== payment.amount
+        || booking.razorpayCurrency !== payment.currency
+        || payment.status !== 'captured'
+        || payment.captured !== true) {
+      throw new Error('Captured payment does not match the server-side order.');
+    }
+
+    const now = Timestamp.now();
+    const reservationRef = typeof booking.walkerId === 'string'
+      && typeof booking.reservationId === 'string'
+      ? db.collection('walkers').doc(booking.walkerId)
+          .collection('reservations').doc(booking.reservationId)
+      : null;
+    const reservationSnap = reservationRef ? await tx.get(reservationRef) : null;
+    const reservation = reservationSnap?.data();
+    const reservationIsValid = booking.status === 'walker_held'
+      && reservationRef !== null
+      && reservationSnap?.exists === true
+      && reservation?.status === 'held'
+      && reservation.expiresAt instanceof Timestamp
+      && reservation.expiresAt.toMillis() > now.toMillis();
+
+    tx.create(paymentRef, {
+      bookingId,
+      razorpayOrderId: payment.order_id,
+      amountPaise: payment.amount,
+      currency: payment.currency,
+      status: 'captured',
+      source,
+      capturedAt: payment.created_at
+        ? Timestamp.fromMillis(payment.created_at * 1000)
+        : now,
+      recordedAt: now,
+    });
+
+    if (reservationIsValid && reservationRef) {
+      tx.update(reservationRef, {
+        status: 'confirmed',
+        paymentId: payment.id,
+        confirmedAt: now,
+      });
+      tx.update(bookingRef, {
+        status: 'confirmed',
+        paymentStatus: 'paid',
+        razorpayPaymentId: payment.id,
+        paidAt: now,
+        confirmedAt: now,
+        updatedAt: now,
+      });
+      return { status: 'confirmed', bookingId };
+    }
+
+    tx.update(bookingRef, {
+      status: 'payment_review',
+      paymentStatus: 'paid',
+      razorpayPaymentId: payment.id,
+      paymentReviewRequired: true,
+      paymentReviewReason: 'Payment captured after walker hold became invalid.',
+      paidAt: now,
+      updatedAt: now,
+    });
+    return { status: 'payment_review', bookingId };
+  });
+}
+
+export const createRazorpayOrder = onCall(
+  { secrets: [RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET] },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in before starting payment.');
+    }
+    const bookingId = request.data?.bookingId;
+    if (typeof bookingId !== 'string' || !/^[A-Za-z0-9]{1,128}$/.test(bookingId)) {
+      throw new HttpsError('invalid-argument', 'A valid booking ID is required.');
+    }
+
+    const bookingRef = db.collection('bookings').doc(bookingId);
+    const bookingSnap = await bookingRef.get();
+    if (!bookingSnap.exists || bookingSnap.data()?.customerId !== request.auth.uid) {
+      throw new HttpsError('not-found', 'Booking request was not found.');
+    }
+    const booking = bookingSnap.data()!;
+    if (booking.status !== 'walker_held'
+        || typeof booking.walkerId !== 'string'
+        || typeof booking.reservationId !== 'string'
+        || !(booking.reservationExpiresAt instanceof Timestamp)
+        || booking.reservationExpiresAt.toMillis() <= Date.now()) {
+      throw new HttpsError('failed-precondition', 'Your walker hold has expired. Please check availability again.');
+    }
+    if (booking.paymentOrderStatus === 'created'
+        && typeof booking.razorpayOrderId === 'string') {
+      return {
+        bookingId,
+        orderId: booking.razorpayOrderId,
+        amount: booking.razorpayAmountPaise,
+        currency: booking.razorpayCurrency,
+        keyId: RAZORPAY_KEY_ID.value(),
+      };
+    }
+    if (booking.paymentOrderStatus === 'creating') {
+      throw new HttpsError('aborted', 'Payment order creation is already in progress. Please retry shortly.');
+    }
+    if (booking.paymentStatus === 'paid') {
+      throw new HttpsError('already-exists', 'This booking has already been paid.');
+    }
+
+    const duration = String(booking.durationMinutes);
+    const pricingSnap = await db.collection('bookingPricing').doc(duration).get();
+    const pricing = pricingSnap.data();
+    const amountPaise = pricing?.active === true ? pricing.amountPaise : null;
+    if (!Number.isSafeInteger(amountPaise) || amountPaise <= 0) {
+      throw new HttpsError('failed-precondition', 'Pricing for ' + duration + ' minutes is not configured. Please contact DOJO WALK.');
+    }
+    const currency = 'INR';
+    const lockId = db.collection('_paymentOrderLocks').doc().id;
+    const reservationRef = db.collection('walkers').doc(booking.walkerId)
+      .collection('reservations').doc(booking.reservationId);
+    const paymentExpiresAt = Timestamp.fromMillis(Date.now() + PAYMENT_WINDOW_MINUTES * 60 * 1000);
+
+    try {
+      await db.runTransaction(async (tx) => {
+        const [freshBooking, reservationSnap] = await Promise.all([
+          tx.get(bookingRef),
+          tx.get(reservationRef),
+        ]);
+        if (!freshBooking.exists || freshBooking.data()?.customerId !== request.auth!.uid
+            || freshBooking.data()?.status !== 'walker_held'
+            || freshBooking.data()?.paymentOrderStatus === 'created'
+            || freshBooking.data()?.paymentOrderStatus === 'creating'
+            || !reservationSnap.exists
+            || reservationSnap.data()?.status !== 'held'
+            || !(reservationSnap.data()?.expiresAt instanceof Timestamp)
+            || reservationSnap.data()!.expiresAt.toMillis() <= Date.now()) {
+          throw new HttpsError('failed-precondition', 'Walker hold is no longer valid for payment.');
+        }
+        tx.update(bookingRef, {
+          paymentOrderStatus: 'creating',
+          paymentOrderLockId: lockId,
+          razorpayAmountPaise: amountPaise,
+          razorpayCurrency: currency,
+          paymentOrderStartedAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+          reservationExpiresAt: paymentExpiresAt,
+        });
+        tx.update(reservationRef, {
+          expiresAt: paymentExpiresAt,
+          paymentWindowStartedAt: Timestamp.now(),
+        });
+      });
+    } catch (error) {
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError('aborted', 'Could not lock the walker hold for payment.');
+    }
+
+    let order: { id: string; amount: number; currency: string; status: string };
+    try {
+      order = await razorpayApi('/orders', RAZORPAY_KEY_ID.value(),
+        RAZORPAY_KEY_SECRET.value(), 'POST', {
+          amount: amountPaise,
+          currency,
+          receipt: ('dw_' + bookingId).slice(0, 40),
+          notes: {
+            booking_id: bookingId,
+            customer_uid: request.auth.uid,
+            reservation_id: booking.reservationId,
+          },
+        });
+    } catch (_) {
+      await db.runTransaction(async (tx) => {
+        const fresh = await tx.get(bookingRef);
+        if (fresh.exists && fresh.data()?.paymentOrderLockId === lockId) {
+          tx.update(bookingRef, {
+            paymentOrderStatus: 'failed',
+            paymentOrderErrorAt: Timestamp.now(),
+            updatedAt: Timestamp.now(),
+          });
+        }
+      });
+      throw new HttpsError('unavailable', 'Razorpay could not create the payment order. Please retry.');
+    }
+
+    await db.runTransaction(async (tx) => {
+      const fresh = await tx.get(bookingRef);
+      if (!fresh.exists || fresh.data()?.paymentOrderLockId !== lockId) {
+        throw new HttpsError('aborted', 'Payment order state changed. Contact support before retrying.');
+      }
+      tx.update(bookingRef, {
+        paymentOrderStatus: 'created',
+        razorpayOrderId: order.id,
+        razorpayAmountPaise: order.amount,
+        razorpayCurrency: order.currency,
+        paymentExpiresAt,
+        updatedAt: Timestamp.now(),
+      });
+    });
+
+    return {
+      bookingId,
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      keyId: RAZORPAY_KEY_ID.value(),
+    };
+  },
+);
+
+export const verifyRazorpayCheckout = onCall(
+  { secrets: [RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET] },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in to verify this payment.');
+    }
+    const { bookingId, paymentId, signature } = request.data ?? {};
+    if (typeof bookingId !== 'string' || typeof paymentId !== 'string'
+        || typeof signature !== 'string' || !/^pay_[A-Za-z0-9]+$/.test(paymentId)) {
+      throw new HttpsError('invalid-argument', 'Payment verification details are invalid.');
+    }
+    const bookingRef = db.collection('bookings').doc(bookingId);
+    const bookingSnap = await bookingRef.get();
+    if (!bookingSnap.exists || bookingSnap.data()?.customerId !== request.auth.uid) {
+      throw new HttpsError('not-found', 'Booking request was not found.');
+    }
+    const booking = bookingSnap.data()!;
+    const orderId = booking.razorpayOrderId;
+    if (typeof orderId !== 'string' || booking.paymentOrderStatus !== 'created') {
+      throw new HttpsError('failed-precondition', 'No server-created Razorpay order exists for this booking.');
+    }
+    const expected = hmacHex(RAZORPAY_KEY_SECRET.value(), orderId + '|' + paymentId);
+    if (!safeHexEqual(expected, signature)) {
+      throw new HttpsError('permission-denied', 'Razorpay payment signature is invalid.');
+    }
+    let payment: RazorpayPayment;
+    try {
+      payment = await razorpayApi('/payments/' + encodeURIComponent(paymentId),
+        RAZORPAY_KEY_ID.value(), RAZORPAY_KEY_SECRET.value(), 'GET');
+    } catch (_) {
+      throw new HttpsError('unavailable', 'Could not verify payment status with Razorpay.');
+    }
+    if (payment.order_id !== orderId || payment.status !== 'captured'
+        || payment.captured !== true || payment.amount !== booking.razorpayAmountPaise
+        || payment.currency !== 'INR') {
+      throw new HttpsError('failed-precondition', 'Payment is not captured for this booking order yet.');
+    }
+    try {
+      return await finalizeCapturedRazorpayPayment(bookingId, payment, 'checkout');
+    } catch (_) {
+      throw new HttpsError('failed-precondition', 'Payment was received but booking confirmation needs support review.');
+    }
+  },
+);
+
+export const razorpayWebhook = onRequest(
+  { secrets: [RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET] },
+  async (request, response) => {
+    if (request.method !== 'POST') {
+      response.status(405).send('Method not allowed');
+      return;
+    }
+    const signature = request.header('x-razorpay-signature') ?? '';
+    const rawBody = request.rawBody;
+    if (!rawBody || !safeHexEqual(
+      hmacHex(RAZORPAY_WEBHOOK_SECRET.value(), rawBody.toString('utf8')),
+      signature,
+    )) {
+      response.status(400).send('Invalid webhook signature');
+      return;
+    }
+
+    let event: any;
+    try {
+      event = JSON.parse(rawBody.toString('utf8'));
+    } catch (_) {
+      response.status(400).send('Invalid JSON');
+      return;
+    }
+    if (event.event !== 'payment.captured') {
+      response.status(200).send('Event ignored');
+      return;
+    }
+
+    const entity = event.payload?.payment?.entity;
+    if (!entity || typeof entity.id !== 'string' || typeof entity.order_id !== 'string') {
+      response.status(400).send('Missing payment entity');
+      return;
+    }
+    const eventId = request.header('x-razorpay-event-id')
+      ?? createHash('sha256').update(rawBody).digest('hex');
+    const eventRef = db.collection('razorpayWebhookEvents').doc(eventId);
+
+    try {
+      const existingEvent = await eventRef.get();
+      if (existingEvent.exists) {
+        response.status(200).send('Duplicate event acknowledged');
+        return;
+      }
+      const payment = await razorpayApi('/payments/' + encodeURIComponent(entity.id),
+        RAZORPAY_KEY_ID.value(), RAZORPAY_KEY_SECRET.value(), 'GET') as RazorpayPayment;
+      if (payment.status !== 'captured' || payment.captured !== true
+          || payment.order_id !== entity.order_id) {
+        response.status(400).send('Payment is not captured');
+        return;
+      }
+      const bookings = await db.collection('bookings')
+        .where('razorpayOrderId', '==', payment.order_id)
+        .limit(1).get();
+      if (bookings.empty) {
+        response.status(404).send('Order is not mapped to a booking');
+        return;
+      }
+      const bookingId = bookings.docs[0].id;
+      await finalizeCapturedRazorpayPayment(bookingId, payment, 'webhook');
+      await eventRef.create({
+        event: event.event,
+        paymentId: payment.id,
+        orderId: payment.order_id,
+        processedAt: Timestamp.now(),
+      });
+      response.status(200).send('Webhook processed');
+    } catch (_) {
+      response.status(500).send('Webhook processing failed; retry delivery');
+    }
+  },
+);
+
