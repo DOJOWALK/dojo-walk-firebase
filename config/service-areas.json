@@ -7,8 +7,13 @@
     { "id": "ghaziabad", "name": "Ghaziabad", "enabledForBookingDrafts": true }
   ],
   "serviceability": {
-    "requiresExactAddressCheck": true,
+    "mode": "fail_closed",
+    "requiresVerifiedPincode": true,
+    "requiresActiveWalker": true,
+    "requiresAvailabilityWindowToContainEntireWalk": true,
     "coveragePolygonsConfigured": false,
-    "note": "City selection is not confirmation of service at a specific address. Add verified pincodes or geofences before accepting paid bookings."
+    "verifiedPincodesConfigured": false,
+    "walkerAvailabilityConfigured": false,
+    "note": "No pincode is serviceable until an admin creates its verified service-area document and links active walkers with matching availability windows. A city selection alone never confirms service."
   }
 }
