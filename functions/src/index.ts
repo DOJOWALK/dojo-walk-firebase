@@ -63,6 +63,17 @@ export const createBookingDraft = onCall(async (request) => {
   if (!Number.isInteger(durationMinutes) || !allowedDurations.has(durationMinutes)) {
     throw new HttpsError('invalid-argument', 'Duration must be 30, 45, or 60 minutes.');
   }
+  // Do not create drafts or hold walkers while this duration is unpriced/disabled.
+  const pricingSnap = await db.collection('bookingPricing').doc(String(durationMinutes)).get();
+  const configuredAmountPaise = pricingSnap.data()?.amountPaise;
+  if (pricingSnap.data()?.active !== true
+      || !Number.isSafeInteger(configuredAmountPaise)
+      || configuredAmountPaise <= 0) {
+    throw new HttpsError(
+      'failed-precondition',
+      'Pricing for ' + durationMinutes + ' minutes is not configured yet. Please contact DOJO WALK.',
+    );
+  }
   if (typeof city !== 'string' || !cityConfig.has(city)) {
     throw new HttpsError('failed-precondition', 'This city is not in the initial launch area.');
   }
@@ -808,7 +819,7 @@ export const setBookingPricing = onCall(async (request) => {
       || !Number.isFinite(amountRupees)
       || amountRupees < 0
       || amountRupees > 100000
-      || Math.round(amountRupees * 100) !== amountRupees * 100) {
+      || Math.abs(amountRupees * 100 - Math.round(amountRupees * 100)) > 1e-7) {
     throw new HttpsError('invalid-argument', 'Enter a valid non-negative price in rupees (up to two decimal places).');
   }
   const amountPaise = Math.round(amountRupees * 100);
