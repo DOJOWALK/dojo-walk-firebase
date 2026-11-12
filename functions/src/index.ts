@@ -776,3 +776,56 @@ export const getBookingPaymentStatus = onCall(async (request) => {
   };
 });
 
+export const getBookingPricing = onCall(async (request) => {
+  if (!request.auth || request.auth.token.admin !== true) {
+    throw new HttpsError('permission-denied', 'Admin access is required.');
+  }
+  const durations = ['30', '45', '60'] as const;
+  const snapshots = await Promise.all(
+    durations.map((duration) => db.collection('bookingPricing').doc(duration).get()),
+  );
+  return Object.fromEntries(durations.map((duration, index) => {
+    const data = snapshots[index].data();
+    const amountPaise = Number.isSafeInteger(data?.amountPaise) && data!.amountPaise >= 0
+      ? data!.amountPaise : 0;
+    return [duration, {
+      amountPaise,
+      amountRupees: amountPaise / 100,
+      active: data?.active === true && amountPaise > 0,
+      currency: 'INR',
+    }];
+  }));
+});
+
+export const setBookingPricing = onCall(async (request) => {
+  if (!request.auth || request.auth.token.admin !== true) {
+    throw new HttpsError('permission-denied', 'Admin access is required.');
+  }
+  const duration = request.data?.duration;
+  const amountRupees = request.data?.amountRupees;
+  if (!['30', '45', '60'].includes(duration)
+      || typeof amountRupees !== 'number'
+      || !Number.isFinite(amountRupees)
+      || amountRupees < 0
+      || amountRupees > 100000
+      || Math.round(amountRupees * 100) !== amountRupees * 100) {
+    throw new HttpsError('invalid-argument', 'Enter a valid non-negative price in rupees (up to two decimal places).');
+  }
+  const amountPaise = Math.round(amountRupees * 100);
+  const now = Timestamp.now();
+  await db.collection('bookingPricing').doc(duration).set({
+    durationMinutes: Number(duration),
+    amountPaise,
+    currency: 'INR',
+    active: amountPaise > 0,
+    updatedAt: now,
+    updatedBy: request.auth.uid,
+  }, { merge: true });
+  return {
+    duration,
+    amountRupees,
+    amountPaise,
+    active: amountPaise > 0,
+  };
+});
+
