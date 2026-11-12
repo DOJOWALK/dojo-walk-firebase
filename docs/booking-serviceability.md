@@ -49,3 +49,22 @@ A window qualifies only when `startAt <= requestedStart` and `endAt >= requested
 - Before taking payment, implement a transactional/lease-based walker hold, final assignment, expiry/release, and idempotent payment order/webhook flow.
 - Keep these collections writable only by trusted server/admin operations. The existing Firestore catch-all deny rule blocks client writes.
 - Configure verified pin codes and real walker windows before describing any neighborhood as live or accepting paid bookings.
+
+## Transactional walker hold
+
+After a customer creates a draft, the authenticated app may call `reserveWalkerForBooking` with its booking ID.
+
+- The callable checks booking ownership and draft status on the server.
+- It rechecks the walker's active flag, pincode and full-interval availability window.
+- It checks for overlapping held (unexpired) or confirmed reservations.
+- It writes a 10-minute hold and changes the booking status to `walker_held` in one Firestore transaction.
+- Every reservation transaction also updates the walker's shared reservation-version field. This creates a transaction conflict between simultaneous attempts against the same walker, so overlapping holds cannot both commit.
+- If a hold expires, the next reservation attempt for that booking marks the old hold expired and returns the booking to draft before retrying.
+- The customer can call `releaseWalkerHold` with the booking ID to release their own active hold.
+
+Reservation documents live at `walkers/{walkerUid}/reservations/{reservationId}` and include `bookingId`, `customerId`, `startAt`, `endAt`, `status`, `expiresAt`, and `createdAt`.
+
+## Payment gateway boundary
+
+The current backend deliberately does not create payment orders or mark bookings paid. Before implementation, the business must select a payment provider (for example Razorpay, Cashfree, or PayU) and configure its server-side credentials in Firebase Secret Manager. The production flow must create the provider order server-side for the exact server-calculated amount, verify the signed provider webhook, enforce idempotency, and atomically convert a valid hold into a confirmed booking. Never trust a client payment-success callback or client-supplied amount.
+
