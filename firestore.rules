@@ -21,6 +21,19 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /walkers/{walkerId} {
+      allow read: if signedIn() && (request.auth.uid == walkerId || isAdmin());
+      allow write: if false;
+      match /availabilityWindows/{windowId} {
+        allow read: if signedIn() && (request.auth.uid == walkerId || isAdmin());
+        allow write: if false;
+      }
+      match /reservations/{reservationId} {
+        allow read: if signedIn() && (request.auth.uid == walkerId || isAdmin());
+        allow write: if false;
+      }
+    }
+
     match /bookings/{bookingId} {
       allow read: if signedIn() && (
         resource.data.customerId == request.auth.uid
