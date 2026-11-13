@@ -378,6 +378,111 @@ export const submitWalkerApplication = onCall(async (request) => {
   return { status: 'pending', message: 'Your application was submitted for admin review.' };
 });
 
+
+export const saveWalkerAvailability = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to update availability.');
+  const uid = request.auth.uid;
+  const walkerRef = db.collection('walkers').doc(uid);
+  const walkerSnap = await walkerRef.get();
+  if (!walkerSnap.exists || walkerSnap.data()?.active !== true
+      || walkerSnap.data()?.applicationStatus !== 'approved') {
+    throw new HttpsError('permission-denied', 'Only approved active walkers can set availability.');
+  }
+  const rawWindows = request.data?.windows;
+  if (!Array.isArray(rawWindows) || rawWindows.length > 14) {
+    throw new HttpsError('invalid-argument', 'Submit up to 14 availability windows at a time.');
+  }
+  const parsed = rawWindows.map((item: any) => {
+    if (!item || typeof item.startAt !== 'string' || typeof item.endAt !== 'string') {
+      throw new HttpsError('invalid-argument', 'Each availability window needs start and end times.');
+    }
+    const start = new Date(item.startAt);
+    const end = new Date(item.endAt);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())
+        || start.getTime() <= Date.now() || end.getTime() <= start.getTime()
+        || end.getTime() - start.getTime() > 16 * 60 * 60 * 1000) {
+      throw new HttpsError('invalid-argument', 'Availability must be a future window no longer than 16 hours.');
+    }
+    return { start, end };
+  }).sort((a, b) => a.start.getTime() - b.start.getTime());
+  for (let i = 1; i < parsed.length; i++) {
+    if (parsed[i].start.getTime() < parsed[i - 1].end.getTime()) {
+      throw new HttpsError('invalid-argument', 'Availability windows cannot overlap.');
+    }
+  }
+  const windowsRef = walkerRef.collection('availabilityWindows');
+  const old = await windowsRef.where('status', '==', 'available')
+    .where('startAt', '>', Timestamp.now()).limit(400).get();
+  const batch = db.batch();
+  old.docs.forEach((doc) => batch.delete(doc.ref));
+  parsed.forEach(({ start, end }) => {
+    const ref = windowsRef.doc();
+    batch.set(ref, {
+      startAt: Timestamp.fromDate(start),
+      endAt: Timestamp.fromDate(end),
+      status: 'available',
+      updatedAt: Timestamp.now(),
+      createdAt: Timestamp.now(),
+    });
+  });
+  await batch.commit();
+  return { saved: parsed.length };
+});
+
+export const getWalkerDashboard = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to view walker dashboard.');
+  const uid = request.auth.uid;
+  const walkerSnap = await db.collection('walkers').doc(uid).get();
+  if (!walkerSnap.exists || walkerSnap.data()?.active !== true
+      || walkerSnap.data()?.applicationStatus !== 'approved') {
+    throw new HttpsError('permission-denied', 'Walker account is not approved and active.');
+  }
+  const now = Timestamp.now();
+  const bookingsSnap = await db.collection('bookings')
+    .where('walkerId', '==', uid)
+    .where('status', '==', 'confirmed')
+    .where('scheduledAt', '>=', now)
+    .orderBy('scheduledAt', 'asc')
+    .limit(50)
+    .get();
+  const windowsSnap = await db.collection('walkers').doc(uid)
+    .collection('availabilityWindows')
+    .where('status', '==', 'available')
+    .where('endAt', '>', now)
+    .orderBy('startAt', 'asc')
+    .limit(50)
+    .get();
+  return {
+    walker: {
+      displayName: walkerSnap.data()?.displayName ?? 'Walker',
+      city: walkerSnap.data()?.applicationCity ?? '',
+      pincode: walkerSnap.data()?.applicationPincode ?? '',
+    },
+    bookings: bookingsSnap.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        bookingId: doc.id,
+        petName: data.petName ?? '',
+        address: data.address ?? '',
+        city: data.city ?? '',
+        pincode: data.pincode ?? '',
+        durationMinutes: data.durationMinutes ?? 0,
+        scheduledAt: data.scheduledAt instanceof Timestamp ? data.scheduledAt.toDate().toISOString() : null,
+        endsAt: data.endsAt instanceof Timestamp ? data.endsAt.toDate().toISOString() : null,
+        paymentStatus: data.paymentStatus ?? '',
+      };
+    }),
+    availability: windowsSnap.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        windowId: doc.id,
+        startAt: data.startAt instanceof Timestamp ? data.startAt.toDate().toISOString() : null,
+        endAt: data.endAt instanceof Timestamp ? data.endAt.toDate().toISOString() : null,
+      };
+    }),
+  };
+});
+
 export const getWalkerApplication = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Sign in to view your walker application.');
