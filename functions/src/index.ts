@@ -788,8 +788,10 @@ export const getBookingPaymentStatus = onCall(async (request) => {
 });
 
 export const getBookingPricing = onCall(async (request) => {
-  if (!request.auth || request.auth.token.admin !== true) {
-    throw new HttpsError('permission-denied', 'Admin access is required.');
+  // Prices are non-sensitive and must be visible to signed-in customers.
+  // Only setBookingPricing remains restricted to admins.
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in to view walk pricing.');
   }
   const durations = ['30', '45', '60'] as const;
   const snapshots = await Promise.all(
