@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - "functions/**"
+      - "firebase.json"
       - ".github/workflows/firebase-functions-build.yml"
   pull_request:
     branches: [main]
     paths:
       - "functions/**"
+      - "firebase.json"
       - ".github/workflows/firebase-functions-build.yml"
 
 jobs:
@@ -18,10 +20,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Set up Node.js 20
+      - name: Set up Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Install dependencies
         working-directory: functions
         run: npm install
