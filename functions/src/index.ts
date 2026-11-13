@@ -411,10 +411,7 @@ export const saveWalkerAvailability = onCall(async (request) => {
     }
   }
   const windowsRef = walkerRef.collection('availabilityWindows');
-  const old = await windowsRef.where('status', '==', 'available')
-    .where('startAt', '>', Timestamp.now()).limit(400).get();
   const batch = db.batch();
-  old.docs.forEach((doc) => batch.delete(doc.ref));
   parsed.forEach(({ start, end }) => {
     const ref = windowsRef.doc();
     batch.set(ref, {
