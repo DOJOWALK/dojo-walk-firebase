@@ -1,0 +1,30 @@
+name: Firebase Functions Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "functions/**"
+      - ".github/workflows/firebase-functions-build.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "functions/**"
+      - ".github/workflows/firebase-functions-build.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        working-directory: functions
+        run: npm install
+      - name: Compile TypeScript
+        working-directory: functions
+        run: npm run build
