@@ -319,6 +319,173 @@ export const releaseWalkerHold = onCall(async (request) => {
   return { bookingId, status: 'draft', walkerReleased: true };
 });
 
+
+const walkerCityConfig = new Map([
+  ['Noida', 'noida'],
+  ['Greater Noida', 'greater-noida'],
+  ['Ghaziabad', 'ghaziabad'],
+]);
+
+export const submitWalkerApplication = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in before submitting a walker application.');
+  }
+  const data = request.data ?? {};
+  const displayName = typeof data.displayName === 'string' ? data.displayName.trim() : '';
+  const phone = typeof data.phone === 'string' ? data.phone.replace(/\\D/g, '') : '';
+  const city = typeof data.city === 'string' ? data.city : '';
+  const pincode = typeof data.pincode === 'string' ? data.pincode.trim() : '';
+  if (displayName.length < 2 || displayName.length > 80) {
+    throw new HttpsError('invalid-argument', 'Enter your name (2 to 80 characters).');
+  }
+  if (!/^[6-9]\\d{9}$/.test(phone)) {
+    throw new HttpsError('invalid-argument', 'Enter a valid 10-digit Indian mobile number.');
+  }
+  if (!walkerCityConfig.has(city)) {
+    throw new HttpsError('invalid-argument', 'Choose Noida, Greater Noida, or Ghaziabad.');
+  }
+  if (!/^\\d{6}$/.test(pincode)) {
+    throw new HttpsError('invalid-argument', 'Enter a valid 6-digit pincode.');
+  }
+
+  const ref = db.collection('walkers').doc(request.auth.uid);
+  const existing = await ref.get();
+  if (existing.exists && existing.data()?.active === true) {
+    throw new HttpsError('already-exists', 'This walker account is already approved.');
+  }
+  if (existing.exists && existing.data()?.applicationStatus === 'pending') {
+    await ref.set({
+      displayName,
+      phone,
+      applicationCity: city,
+      applicationPincode: pincode,
+      updatedAt: Timestamp.now(),
+    }, { merge: true });
+  } else {
+    await ref.set({
+      displayName,
+      email: request.auth.token.email ?? null,
+      phone,
+      applicationCity: city,
+      applicationPincode: pincode,
+      applicationStatus: 'pending',
+      active: false,
+      serviceablePincodes: [],
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    }, { merge: true });
+  }
+  return { status: 'pending', message: 'Your application was submitted for admin review.' };
+});
+
+export const getWalkerApplication = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in to view your walker application.');
+  }
+  const snap = await db.collection('walkers').doc(request.auth.uid).get();
+  if (!snap.exists) return { exists: false, status: 'not_submitted' };
+  const data = snap.data()!;
+  return {
+    exists: true,
+    status: data.applicationStatus ?? (data.active === true ? 'approved' : 'pending'),
+    displayName: data.displayName ?? '',
+    phone: data.phone ?? '',
+    city: data.applicationCity ?? '',
+    pincode: data.applicationPincode ?? '',
+    active: data.active === true,
+  };
+});
+
+export const listPendingWalkerApplications = onCall(async (request) => {
+  if (!request.auth || request.auth.token.admin !== true) {
+    throw new HttpsError('permission-denied', 'Admin access is required.');
+  }
+  const snap = await db.collection('walkers')
+    .where('applicationStatus', '==', 'pending')
+    .orderBy('createdAt', 'asc')
+    .limit(100)
+    .get();
+  return {
+    applications: snap.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        walkerId: doc.id,
+        displayName: data.displayName ?? '',
+        email: data.email ?? '',
+        phone: data.phone ?? '',
+        city: data.applicationCity ?? '',
+        pincode: data.applicationPincode ?? '',
+        createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : null,
+      };
+    }),
+  };
+});
+
+export const reviewWalkerApplication = onCall(async (request) => {
+  if (!request.auth || request.auth.token.admin !== true) {
+    throw new HttpsError('permission-denied', 'Admin access is required.');
+  }
+  const walkerId = request.data?.walkerId;
+  const decision = request.data?.decision;
+  if (typeof walkerId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(walkerId)
+      || !['approve', 'reject'].includes(decision)) {
+    throw new HttpsError('invalid-argument', 'A valid walker ID and review decision are required.');
+  }
+  const walkerRef = db.collection('walkers').doc(walkerId);
+  const walkerSnap = await walkerRef.get();
+  if (!walkerSnap.exists || walkerSnap.data()?.applicationStatus !== 'pending') {
+    throw new HttpsError('not-found', 'Pending walker application was not found.');
+  }
+  const application = walkerSnap.data()!;
+  const now = Timestamp.now();
+
+  if (decision === 'reject') {
+    await walkerRef.update({
+      applicationStatus: 'rejected',
+      active: false,
+      reviewedAt: now,
+      reviewedBy: request.auth.uid,
+      updatedAt: now,
+    });
+    return { walkerId, status: 'rejected' };
+  }
+
+  const city = application.applicationCity;
+  const pincode = application.applicationPincode;
+  const cityId = typeof city === 'string' ? walkerCityConfig.get(city) : undefined;
+  if (!cityId || typeof pincode !== 'string' || !/^\\d{6}$/.test(pincode)) {
+    throw new HttpsError('failed-precondition', 'Walker application has invalid city or pincode data.');
+  }
+  const coverageRef = db.doc(`serviceAreas/${cityId}/pincodes/${pincode}`);
+  await db.runTransaction(async (tx) => {
+    const [freshWalker, coverageSnap] = await Promise.all([
+      tx.get(walkerRef),
+      tx.get(coverageRef),
+    ]);
+    if (!freshWalker.exists || freshWalker.data()?.applicationStatus !== 'pending') {
+      throw new HttpsError('failed-precondition', 'This application has already been reviewed.');
+    }
+    const coverage = coverageSnap.data();
+    if (!coverageSnap.exists || coverage?.enabled !== true || coverage.city !== city) {
+      throw new HttpsError('failed-precondition', 'This pincode must be enabled by an admin before approving a walker.');
+    }
+    const walkerIds = Array.isArray(coverage.walkerIds)
+      ? coverage.walkerIds.filter((id: unknown): id is string => typeof id === 'string')
+      : [];
+    if (!walkerIds.includes(walkerId)) walkerIds.push(walkerId);
+    tx.update(walkerRef, {
+      applicationStatus: 'approved',
+      active: true,
+      serviceablePincodes: [pincode],
+      reviewedAt: now,
+      reviewedBy: request.auth!.uid,
+      updatedAt: now,
+    });
+    tx.set(coverageRef, { walkerIds, updatedAt: now }, { merge: true });
+  });
+  return { walkerId, status: 'approved', pincode };
+});
+
 const RAZORPAY_KEY_ID = defineSecret('RAZORPAY_KEY_ID');
 const RAZORPAY_KEY_SECRET = defineSecret('RAZORPAY_KEY_SECRET');
 const RAZORPAY_WEBHOOK_SECRET = defineSecret('RAZORPAY_WEBHOOK_SECRET');
