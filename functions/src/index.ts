@@ -411,6 +411,17 @@ export const saveWalkerAvailability = onCall(async (request) => {
     }
   }
   const windowsRef = walkerRef.collection('availabilityWindows');
+  const existing = await windowsRef.where('status', '==', 'available')
+    .where('endAt', '>', Timestamp.now()).limit(400).get();
+  const conflicts = existing.docs.some((doc) => {
+    const data = doc.data();
+    if (!(data.startAt instanceof Timestamp) || !(data.endAt instanceof Timestamp)) return false;
+    return parsed.some(({ start, end }) =>
+      start.getTime() < data.endAt.toMillis() && end.getTime() > data.startAt.toMillis());
+  });
+  if (conflicts) {
+    throw new HttpsError('already-exists', 'This time overlaps with availability you already saved. Choose another time.');
+  }
   const batch = db.batch();
   parsed.forEach(({ start, end }) => {
     const ref = windowsRef.doc();
