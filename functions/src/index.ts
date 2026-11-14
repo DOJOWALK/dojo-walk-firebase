@@ -593,7 +593,7 @@ export const reserveWalkerForBooking = onCall(async (request) => {
         // Include later-starting reservations within the post-walk buffer too.
         const overlapsQuery = walkerRef.collection('reservations')
           .where('startAt', '<', bufferedEndAt)
-          .limit(100);
+          .where('endAt', '>', bufferedStartAt);
         const [windows, overlaps] = await Promise.all([
           tx.get(windowsQuery),
           tx.get(overlapsQuery),
