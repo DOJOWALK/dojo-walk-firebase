@@ -557,6 +557,33 @@ export const getWalkerDashboard = onCall(async (request) => {
   };
 });
 
+export const getCustomerBookings = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to view your bookings.');
+  const snap = await db.collection('bookings')
+    .where('customerId', '==', request.auth.uid)
+    .orderBy('createdAt', 'desc')
+    .limit(50)
+    .get();
+  return {
+    bookings: snap.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        bookingId: doc.id,
+        petName: data.petName ?? '',
+        city: data.city ?? '',
+        pincode: data.pincode ?? '',
+        address: data.address ?? '',
+        durationMinutes: data.durationMinutes ?? 0,
+        scheduledAt: data.scheduledAt instanceof Timestamp ? data.scheduledAt.toDate().toISOString() : null,
+        endsAt: data.endsAt instanceof Timestamp ? data.endsAt.toDate().toISOString() : null,
+        status: data.status ?? 'unknown',
+        paymentStatus: data.paymentStatus ?? 'unpaid',
+        createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : null,
+      };
+    }),
+  };
+});
+
 export const getWalkerApplication = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Sign in to view your walker application.');
