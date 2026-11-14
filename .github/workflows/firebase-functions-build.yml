@@ -10,6 +10,7 @@ on:
       - "firestore.indexes.json"
       - ".github/workflows/firebase-functions-build.yml"
       - ".github/workflows/deploy-firestore-config.yml"
+      - ".github/workflows/deploy-walker-functions.yml"
   pull_request:
     branches: [main]
     paths:
