@@ -332,19 +332,19 @@ export const submitWalkerApplication = onCall(async (request) => {
   }
   const data = request.data ?? {};
   const displayName = typeof data.displayName === 'string' ? data.displayName.trim() : '';
-  const phone = typeof data.phone === 'string' ? data.phone.replace(/\\D/g, '') : '';
+  const phone = typeof data.phone === 'string' ? data.phone.replace(/\D/g, '') : '';
   const city = typeof data.city === 'string' ? data.city : '';
   const pincode = typeof data.pincode === 'string' ? data.pincode.trim() : '';
   if (displayName.length < 2 || displayName.length > 80) {
     throw new HttpsError('invalid-argument', 'Enter your name (2 to 80 characters).');
   }
-  if (!/^[6-9]\\d{9}$/.test(phone)) {
+  if (!/^[6-9]\d{9}$/.test(phone)) {
     throw new HttpsError('invalid-argument', 'Enter a valid 10-digit Indian mobile number.');
   }
   if (!walkerCityConfig.has(city)) {
     throw new HttpsError('invalid-argument', 'Choose Noida, Greater Noida, or Ghaziabad.');
   }
-  if (!/^\\d{6}$/.test(pincode)) {
+  if (!/^\d{6}$/.test(pincode)) {
     throw new HttpsError('invalid-argument', 'Enter a valid 6-digit pincode.');
   }
 
@@ -724,7 +724,7 @@ export const reviewWalkerApplication = onCall(async (request) => {
   const city = application.applicationCity;
   const pincode = application.applicationPincode;
   const cityId = typeof city === 'string' ? walkerCityConfig.get(city) : undefined;
-  if (!cityId || typeof pincode !== 'string' || !/^\\d{6}$/.test(pincode)) {
+  if (!cityId || typeof pincode !== 'string' || !/^\d{6}$/.test(pincode)) {
     throw new HttpsError('failed-precondition', 'Walker application has invalid city or pincode data.');
   }
   const coverageRef = db.doc(`serviceAreas/${cityId}/pincodes/${pincode}`);
