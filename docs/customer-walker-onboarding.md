@@ -19,37 +19,50 @@ Launch cities: Noida, Greater Noida, and Ghaziabad. Serviceability is decided by
 
 ## Customer journey
 
-1. Welcome screen: Continue with mobile number.
-2. Phone entry: accept Indian mobile number, normalize to E.164, explain that an OTP will be sent.
-3. OTP verification: resend cooldown, attempt throttling, clear error and expired-code states.
-4. Profile setup: display name and optional email. Do not ask for the phone again after it is verified.
-5. Service address: choose supported city, enter six-digit pincode, address details, and pet name.
-6. Home: show booking durations (30/45/60 minutes), configured price, and serviceability feedback.
-7. Booking: show assignment and booking status timeline. Payment remains a separate later stage.
+1. **Login:** enter an Indian mobile number and verify it with OTP.
+2. **Profile:** collect customer name; email remains optional.
+3. **Address:** collect the service address, supported city, and six-digit pincode; confirm serviceability.
+4. **Pet details:** collect pet name and only the care/behaviour/emergency details needed to deliver the walk safely.
+5. **Consent:** accept Terms & Conditions and acknowledge the Privacy, cancellation, refund, and grievance policies.
+6. **Booking:** choose 30/45/60-minute duration, view configured price and serviceability, then see assignment and booking status.
+7. **Payment:** keep payment as a separate later stage; do not change Razorpay order, checkout verification, or webhook implementation in this onboarding work.
+
+A normal Customer account does not require Aadhaar, PAN, bank account, or selfie/face KYC for ordinary dog-walking booking. Request additional verification only where a documented legal or specific safety need exists, with notice and an appropriate alternative.
 
 Customer profile should contain only the minimum operational fields: UID, verified phone, display name, optional email, createdAt, updatedAt, and profile-completion state. Address and pet information should be collected in the booking flow and stored with the booking, not exposed publicly.
 
-## Walker journey
+## Walker journey (approved product flow)
 
-1. Welcome screen: Join as a Walker / Sign in.
-2. Phone OTP verification.
-3. Basic profile: legal/display name, profile photo, optional email, city, home pincode, and serviceable area request.
-4. Safety and document step: show the purpose of each requested check, obtain explicit consent, and collect only what the approved verification process needs.
-5. Review screen: applicant sees what was submitted and that account status is Pending.
-6. Admin review: approve/reject with an auditable reviewer UID and timestamp.
-7. Approved dashboard: availability, assigned walks, and walk status actions.
+The Walker must complete all onboarding stages before the operational Dashboard is unlocked:
 
-Walker application must remain inactive and unable to set availability, receive reservations, or start/complete walks until an authorized Admin approves it.
+1. **Login:** enter an Indian mobile number and verify it with Firebase Phone OTP.
+2. **Selfie verification:** capture a live selfie, obtain explicit consent, and complete the configured face-match/liveness check. A profile photo alone is not identity verification.
+3. **KYC:** complete the approved identity and payout checks:
+   - Aadhaar verification through a lawful UIDAI-compliant method, with a non-Aadhaar alternative where required or appropriate.
+   - PAN verification where required for tax/payout compliance.
+   - Bank account verification, including account-holder name matching and a controlled penny-drop/provider check where selected.
+4. **Training:** complete and pass DOJO WALK training covering dog handling, animal welfare, leash and street safety, customer conduct, incident reporting, and emergency response. Record module version, completion time, and result.
+5. **Admin approval:** an authorized Admin reviews the application, verification outcomes, and training result. Record reviewer UID, decision, timestamp, and reason.
+6. **Dashboard unlock:** only after all required checks pass and Admin approval is recorded may the Walker enter the operational Dashboard and accept work.
+
+The operational Dashboard must not contain a KYC collection workflow or ask the Walker to complete KYC after entering it. Incomplete/rejected applicants see only a restricted onboarding/status screen, not booking or availability actions.
+
+Police verification is not part of the default onboarding checklist. Add it only if a documented legal requirement, insurance condition, or approved risk policy for the relevant operating location requires it; never represent it as a universal government requirement without confirming the applicable rule.
+
+Walker application must remain inactive and unable to set availability, receive reservations, or start/complete walks until selfie/face verification, required KYC, training, and authorized Admin approval are all complete.
 
 ## Walker verification and privacy
 
-- Profile photo is a basic profile field, not proof of identity.
-- Aadhaar or other government ID should be requested only after the business has selected a lawful, secure verification process and published a clear privacy notice and retention period.
-- Prefer a verified result/status and a restricted provider reference over storing a full Aadhaar number or unnecessary document copies.
-- If a document image must be stored, use private Cloud Storage paths scoped to the applicant UID, strict Storage Rules, short-lived access for authorized reviewers, audit logs, encryption at rest, and a defined deletion schedule.
-- Never expose document URLs, full ID numbers, or raw verification payloads in Customer app, public Walker profile, logs, analytics, or ordinary admin lists.
-- Police/background verification status should be represented as a restricted status and verification timestamp/provider reference. Do not claim a check is complete unless a trusted process confirms it.
-- Do not make Aadhaar or police verification a hard blocker until the verification vendor/process, consent language, legal basis, access controls, and retention/deletion policy are ready.
+- A profile photo and a live selfie are different. The live selfie step must use a genuine liveness/face-verification process; do not label a simple upload as verified.
+- Before face capture, show a clear notice explaining purpose, provider, retention, access, and how to request help or exercise applicable rights. Obtain the required consent.
+- Aadhaar must be handled only through a lawful UIDAI-compliant verification route. Do not force Aadhaar authentication where the law requires a choice or an alternative. Do not retain Aadhaar biometrics.
+- PAN and bank checks must use a trusted provider or other lawful verification method. Do not store internet-banking passwords, card PINs, OTPs, or UPI PINs.
+- Prefer storing verification outcome, timestamp, provider reference, and masked identifiers instead of full Aadhaar/PAN/bank details.
+- If document images are genuinely required, use private Cloud Storage paths scoped to applicant UID, strict Storage Rules, short-lived access for authorized reviewers, audit logs, encryption at rest, and a defined deletion schedule.
+- Never expose document URLs, full ID numbers, bank account numbers, face templates, or raw provider payloads in Customer app, public Walker profile, logs, analytics, or ordinary Admin lists.
+- Keep selfie/face data separate from the ordinary profile photo; define access, retention, deletion, and incident-response controls before production collection.
+- Police/background verification is not a default product requirement. Add it only after confirming a specific applicable legal/contractual requirement and an authorized verification process.
+- Do not enable live KYC collection until the provider/process, consent language, legal basis, access controls, retention/deletion policy, and failure/review path have been approved.
 
 ## Server-side security requirements
 
