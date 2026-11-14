@@ -1074,6 +1074,62 @@ export const listAdminBookings = onCall(async (request) => {
   };
 });
 
+
+export const listAdminBookingSeries = onCall(async (request) => {
+  if (!request.auth || request.auth.token.admin !== true) {
+    throw new HttpsError('permission-denied', 'Admin access is required.');
+  }
+  const seriesSnapshot = await db.collection('bookingSeries')
+    .orderBy('createdAt', 'desc')
+    .limit(10)
+    .get();
+  const series = await Promise.all(seriesSnapshot.docs.map(async (seriesDoc) => {
+    const data = seriesDoc.data();
+    const occurrenceIds = Array.isArray(data.occurrenceBookingIds)
+      ? data.occurrenceBookingIds.filter((id: unknown): id is string =>
+          typeof id === 'string' && /^[a-f0-9]{40}$/.test(id)).slice(0, 30)
+      : [];
+    const occurrenceSnapshots = await Promise.all(occurrenceIds.map((id) =>
+      db.collection('bookings').doc(id).get()));
+    return {
+      seriesId: seriesDoc.id,
+      customerId: data.customerId ?? '',
+      petName: data.petName ?? '',
+      city: data.city ?? '',
+      pincode: data.pincode ?? '',
+      address: data.address ?? '',
+      durationMinutes: data.durationMinutes ?? 0,
+      timezone: data.timezone ?? '',
+      startDate: data.startDate ?? '',
+      endDate: data.endDate ?? '',
+      weekdays: Array.isArray(data.weekdays) ? data.weekdays : [],
+      timeSlots: Array.isArray(data.timeSlots) ? data.timeSlots : [],
+      allowBackupWalker: data.allowBackupWalker === true,
+      status: data.status ?? 'unknown',
+      occurrenceCount: data.occurrenceCount ?? occurrenceIds.length,
+      candidateOccurrenceCount: data.candidateOccurrenceCount ?? 0,
+      noCandidateWindowCount: data.noCandidateWindowCount ?? 0,
+      createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : null,
+      occurrences: occurrenceSnapshots.filter((snap) => snap.exists).map((snap) => {
+        const occurrence = snap.data()!;
+        return {
+          bookingId: snap.id,
+          localServiceDate: occurrence.localServiceDate ?? '',
+          localServiceTime: occurrence.localServiceTime ?? '',
+          status: occurrence.status ?? 'unknown',
+          paymentStatus: occurrence.paymentStatus ?? 'unpaid',
+          availabilityStatus: occurrence.availabilityStatus ?? 'unknown',
+          walkerId: occurrence.walkerId ?? null,
+          quotedAmountPaise: occurrence.quotedAmountPaise ?? null,
+        };
+      }).sort((left, right) =>
+        (left.localServiceDate + left.localServiceTime)
+          .localeCompare(right.localServiceDate + right.localServiceTime)),
+    };
+  }));
+  return { series };
+});
+
 export const reviewWalkerApplication = onCall(async (request) => {
   if (!request.auth || request.auth.token.admin !== true) {
     throw new HttpsError('permission-denied', 'Admin access is required.');
