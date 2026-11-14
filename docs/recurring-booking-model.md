@@ -35,7 +35,7 @@ Each occurrence must independently pass the existing service-area, walker eligib
 - A different walker is considered only when the customer explicitly opted in to backup substitution for the series/occurrence.
 - If the primary is unavailable and backup consent is off, mark that occurrence as needing customer action; do not silently substitute.
 - A series can have multiple walkers across dates if that is what the customer consented to and actual capacity permits.
-- Enforce travel/rest buffers in the overlap predicate before launch. A simple time-overlap check alone is not sufficient for geographically separated walks.
+- Enforce per-walker travel/rest buffers inside the reservation transaction. The walker profile may set `travelBufferMinutes` from 0 to 120; legacy/missing/invalid values default to 15 minutes. The reservation query reads only intervals intersecting the buffered window, and each hold snapshots its before/after buffer so later admin edits do not rewrite an existing reservation's scheduling assumptions.
 - Recheck eligibility and availability inside the transaction that creates each hold. Precomputed candidate lists are discovery hints only.
 - A failed occurrence must not undo already paid/confirmed independent occurrences unless the customer-facing series terms explicitly define an all-or-nothing policy.
 
