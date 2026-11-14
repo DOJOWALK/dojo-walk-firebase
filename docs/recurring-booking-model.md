@@ -2,7 +2,7 @@
 
 ## Status
 
-The backend now has an initial draft-only callable, `createRecurringBookingSeries`, that expands a selected schedule into a series document and individual booking drafts. It supports the initial `Asia/Kolkata` timezone, up to 31 calendar days and 30 occurrences, one or two distinct daily slots, and deterministic idempotency. It records candidate availability windows, not confirmed capacity. No walker is held, no payment is collected, and no series is confirmed. Do not expose recurring controls in the customer app until the full lifecycle below is implemented and tested end to end.
+The backend has `createRecurringBookingSeries`, which expands a selected schedule into a series document and individual booking drafts. It supports `Asia/Kolkata`, up to 31 calendar days and 30 occurrences, one or two distinct daily slots, and deterministic idempotency. The customer app can review the occurrence list and individually initiate a draft occurrence: `refreshRecurringOccurrenceQuote` snapshots the current admin-managed price, the customer explicitly accepts it, `reserveWalkerForBooking` rechecks capacity transactionally, and the existing Razorpay flow handles payment for that one booking only. The series itself is never bulk-reserved or bulk-paid. Candidate availability windows remain indicative, not confirmed capacity.
 
 ## Core model
 
@@ -24,7 +24,7 @@ A future callable (proposed name: `createRecurringBookingSeries`) must:
 5. Snapshot the active server-side pricing configuration for each occurrence. The current callable snapshots the configured amount per occurrence. Admin price changes affect future quotes only; accepted occurrence quotes remain immutable.
 6. Create occurrence drafts only after validation. Do not claim the whole series is confirmed merely because drafts exist.
 7. Return per-occurrence results and clearly identify dates/times where no availability window candidate was found. A candidate is not a confirmed capacity slot: reservation transactions must recheck live overlap and eligibility. A partial schedule must be shown as partial; never silently drop failed occurrences.
-8. Require the owner to review and accept the occurrence-level total before any payment is collected. The server must calculate the total from occurrence quote snapshots; the client must not submit a trusted amount.
+8. For the initial pilot, do not charge an occurrence-level series total. The customer selects one draft occurrence, the server refreshes its current admin-managed quote, and the owner accepts that exact price before the walker hold and one-booking Razorpay order. The client never submits a trusted amount.
 9. Do not create one long reservation or assign one walker for the entire series.
 
 ## Assignment and capacity
@@ -48,7 +48,7 @@ Before enabling series checkout, choose and implement one auditable billing mode
 - **Per-occurrence payment:** each walk uses the existing booking payment flow; simplest initial pilot and clearest refund accounting.
 - **Series invoice:** create a server-owned invoice with immutable line items referencing occurrence IDs and quote snapshots; payment reconciliation must atomically record invoice payment and allocate it to those occurrences. Handle partial refunds and cancellations explicitly.
 
-Until one model is implemented, recurring series should be a schedule request / draft only and should not imply paid or confirmed service.
+The initial customer flow uses per-occurrence payment. A series remains a schedule container; only individually held, paid and server-confirmed occurrence bookings become confirmed service. A customer may leave other occurrences as drafts.
 
 ## Lifecycle and admin operations
 
@@ -66,15 +66,15 @@ Admin tools must support:
 
 ## Current implementation boundary
 
-The current callable requires a client-generated idempotency key and rejects reuse of that key with different schedule details. It validates real calendar dates, selected weekdays, unique slot IDs/times, and ensures two daily slots are separated by at least the requested walk duration. It creates at most 31 writes (one series plus 30 occurrence drafts) in a single transaction. Candidate availability is only a pre-screen based on configured availability windows; it does not query reservation conflicts and must never be presented as a confirmed slot.
+The current callable requires a client-generated idempotency key and rejects reuse of that key with different schedule details. It validates real calendar dates, selected weekdays, unique slot IDs/times, and ensures two daily slots are separated by at least the requested walk duration. It creates at most 31 writes (one series plus 30 occurrence drafts) in a single transaction. Candidate availability is only a pre-screen based on configured availability windows; it does not query reservation conflicts and must never be presented as a confirmed slot. `refreshRecurringOccurrenceQuote` may update the quote only while the occurrence is an unpaid future draft owned by the caller. `reserveWalkerForBooking` now rejects an expired quote before placing a hold, avoiding a walker hold that cannot proceed to payment.
 
 ## Safe rollout
 
 1. Add automated tests for timezone-safe occurrence expansion and deterministic idempotency keys.
 2. Add server-side series and occurrence creation with a strict horizon/count cap; no walker holds or payment in this first slice.
-3. Add customer review of the exact occurrence list and total, plus per-occurrence availability results.
-4. Add one-at-a-time reservation and explicit backup-consent handling for each occurrence.
-5. Launch per-occurrence payment for the Crossings Republik pilot; only later consider consolidated series invoicing.
+3. Keep customer review of the exact occurrence list and per-occurrence availability results; the customer app currently shows these in the schedule-creation result.
+4. Continue one-at-a-time reservation and explicit backup-consent handling for each occurrence; the customer app now starts this flow from an individual occurrence.
+5. Complete end-to-end testing of quote expiry, reservation contention, Razorpay failure/retry, late capture and cancellation before enabling the pilot.
 6. Add admin series/occurrence management and cancellation/refund tooling before enabling recurring bookings to all customers.
 
 ## Required tests before customer rollout
@@ -83,7 +83,7 @@ The current callable requires a client-generated idempotency key and rejects reu
 - Morning and evening slots produce distinct jobs.
 - Duplicate/retried requests create no duplicate occurrences.
 - Occurrence cap and date horizon are enforced server-side.
-- Disabled/unconfigured pricing blocks quote creation; every occurrence stores an immutable quote snapshot.
+- Disabled/unconfigured pricing blocks quote creation; refreshed occurrence quotes are immutable during their 30-minute acceptance window and are checked again before a walker hold.
 - Admin price edits do not change existing occurrence quotes.
 - One unavailable occurrence does not create a false whole-series confirmation.
 - Primary walker continuity and backup consent are enforced independently per occurrence.
