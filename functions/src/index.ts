@@ -105,6 +105,9 @@ export const createBookingDraft = onCall(async (request) => {
   }
 
   // This creates a draft only. It does not reserve a walker or collect payment.
+  const now = Timestamp.now();
+  const quoteExpiresAt = Timestamp.fromMillis(now.toMillis() + PRICE_QUOTE_MINUTES * 60 * 1000);
+  const pricingData = pricingSnap.data()!;
   const ref = await db.collection('bookings').add({
     customerId: request.auth.uid,
     city,
@@ -115,16 +118,31 @@ export const createBookingDraft = onCall(async (request) => {
     scheduledAt: Timestamp.fromDate(start),
     endsAt: Timestamp.fromDate(end),
     eligibleWalkerIds: availableWalkerIds,
+    // Immutable customer-price quote for this booking. Later admin price edits
+    // apply only to new booking drafts, never silently to this quote.
+    quotedAmountPaise: configuredAmountPaise,
+    quotedCurrency: 'INR',
+    pricingVersion: pricingData.version ?? null,
+    pricingUpdatedAt: pricingData.updatedAt instanceof Timestamp ? pricingData.updatedAt : null,
+    quotedAt: now,
+    quoteExpiresAt,
     status: 'draft',
     paymentStatus: 'unpaid',
-    createdAt: Timestamp.now(),
+    createdAt: now,
   });
 
-  return { bookingId: ref.id, status: 'draft' };
+  return {
+    bookingId: ref.id,
+    status: 'draft',
+    amountPaise: configuredAmountPaise,
+    currency: 'INR',
+    quoteExpiresAt: quoteExpiresAt.toDate().toISOString(),
+  };
 });
 
 
 const HOLD_MINUTES = 10;
+const PRICE_QUOTE_MINUTES = 30;
 
 export const reserveWalkerForBooking = onCall(async (request) => {
   if (!request.auth) {
@@ -1002,13 +1020,36 @@ export const createRazorpayOrder = onCall(
     }
 
     const duration = String(booking.durationMinutes);
-    const pricingSnap = await db.collection('bookingPricing').doc(duration).get();
-    const pricing = pricingSnap.data();
-    const amountPaise = pricing?.active === true ? pricing.amountPaise : null;
-    if (!Number.isSafeInteger(amountPaise) || amountPaise <= 0) {
-      throw new HttpsError('failed-precondition', 'Pricing for ' + duration + ' minutes is not configured. Please contact DOJO WALK.');
+    let amountPaise = booking.quotedAmountPaise;
+    let currency = booking.quotedCurrency;
+    let quoteExpiresAt = booking.quoteExpiresAt;
+
+    // Backward compatibility for drafts created before immutable quotes were
+    // introduced: snapshot the current admin price once before creating an order.
+    if (amountPaise === undefined || currency === undefined) {
+      const pricingSnap = await db.collection('bookingPricing').doc(duration).get();
+      const pricing = pricingSnap.data();
+      amountPaise = pricing?.active === true ? pricing.amountPaise : null;
+      currency = 'INR';
+      quoteExpiresAt = Timestamp.fromMillis(Date.now() + PRICE_QUOTE_MINUTES * 60 * 1000);
+      if (!Number.isSafeInteger(amountPaise) || amountPaise <= 0) {
+        throw new HttpsError('failed-precondition', 'Pricing for ' + duration + ' minutes is not configured. Please contact DOJO WALK.');
+      }
+      await bookingRef.update({
+        quotedAmountPaise: amountPaise,
+        quotedCurrency: currency,
+        pricingVersion: pricing?.version ?? null,
+        pricingUpdatedAt: pricing?.updatedAt instanceof Timestamp ? pricing.updatedAt : null,
+        quotedAt: Timestamp.now(),
+        quoteExpiresAt,
+        updatedAt: Timestamp.now(),
+      });
     }
-    const currency = 'INR';
+
+    if (!Number.isSafeInteger(amountPaise) || amountPaise <= 0 || currency !== 'INR'
+        || !(quoteExpiresAt instanceof Timestamp) || quoteExpiresAt.toMillis() <= Date.now()) {
+      throw new HttpsError('failed-precondition', 'This price quote has expired. Please create a new booking to see the current price.');
+    }
     const lockId = db.collection('_paymentOrderLocks').doc().id;
     const reservationRef = db.collection('walkers').doc(booking.walkerId)
       .collection('reservations').doc(booking.reservationId);
@@ -1282,19 +1323,51 @@ export const setBookingPricing = onCall(async (request) => {
   }
   const amountPaise = Math.round(amountRupees * 100);
   const now = Timestamp.now();
-  await db.collection('bookingPricing').doc(duration).set({
-    durationMinutes: Number(duration),
-    amountPaise,
-    currency: 'INR',
-    active: amountPaise > 0,
-    updatedAt: now,
-    updatedBy: request.auth.uid,
-  }, { merge: true });
+  const pricingRef = db.collection('bookingPricing').doc(duration);
+  const auditRef = db.collection('pricingAuditLogs').doc();
+  let previousAmountPaise: number | null = null;
+  let version = 1;
+
+  await db.runTransaction(async (tx) => {
+    const currentSnap = await tx.get(pricingRef);
+    const current = currentSnap.data();
+    previousAmountPaise = Number.isSafeInteger(current?.amountPaise)
+      ? current!.amountPaise : null;
+    version = Number.isSafeInteger(current?.version) && current!.version > 0
+      ? current!.version + 1 : 1;
+
+    tx.set(pricingRef, {
+      durationMinutes: Number(duration),
+      amountPaise,
+      currency: 'INR',
+      active: amountPaise > 0,
+      version,
+      updatedAt: now,
+      updatedBy: request.auth!.uid,
+    }, { merge: true });
+
+    tx.create(auditRef, {
+      entityType: 'booking_duration_price',
+      entityId: duration,
+      durationMinutes: Number(duration),
+      previousAmountPaise,
+      newAmountPaise: amountPaise,
+      currency: 'INR',
+      previousActive: current?.active === true,
+      newActive: amountPaise > 0,
+      version,
+      changedBy: request.auth!.uid,
+      changedAt: now,
+    });
+  });
+
   return {
     duration,
     amountRupees,
     amountPaise,
     active: amountPaise > 0,
+    version,
+    previousAmountPaise,
   };
 });
 
