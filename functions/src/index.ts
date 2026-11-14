@@ -576,13 +576,23 @@ export const reserveWalkerForBooking = onCall(async (request) => {
 
         const startAt = freshData.scheduledAt as Timestamp;
         const endAt = freshData.endsAt as Timestamp;
+        // Travel/rest buffer is configured per walker by operations. Older walker
+        // records safely fall back to 15 minutes until an admin sets a value.
+        const configuredBuffer = walkerSnap.data()?.travelBufferMinutes;
+        const bufferMinutes = Number.isInteger(configuredBuffer)
+          && configuredBuffer >= 0 && configuredBuffer <= 120
+          ? configuredBuffer : 15;
+        const bufferMillis = bufferMinutes * 60 * 1000;
+        const bufferedStartAt = Timestamp.fromMillis(startAt.toMillis() - bufferMillis);
+        const bufferedEndAt = Timestamp.fromMillis(endAt.toMillis() + bufferMillis);
         const windowsQuery = walkerRef.collection('availabilityWindows')
           .where('status', '==', 'available')
           .where('startAt', '<=', startAt)
           .where('endAt', '>=', endAt)
           .limit(1);
+        // Include later-starting reservations within the post-walk buffer too.
         const overlapsQuery = walkerRef.collection('reservations')
-          .where('startAt', '<', endAt)
+          .where('startAt', '<', bufferedEndAt)
           .limit(100);
         const [windows, overlaps] = await Promise.all([
           tx.get(windowsQuery),
@@ -597,9 +607,18 @@ export const reserveWalkerForBooking = onCall(async (request) => {
             || (data.status === 'held'
               && data.expiresAt instanceof Timestamp
               && data.expiresAt.toMillis() > now.toMillis());
-          return active
-            && data.endAt instanceof Timestamp
-            && data.endAt.toMillis() > startAt.toMillis();
+          if (!active || !(data.startAt instanceof Timestamp)
+              || !(data.endAt instanceof Timestamp)) return false;
+          const existingBefore = Number.isInteger(data.bufferBeforeMinutes)
+            && data.bufferBeforeMinutes >= 0 && data.bufferBeforeMinutes <= 120
+            ? data.bufferBeforeMinutes : 15;
+          const existingAfter = Number.isInteger(data.bufferAfterMinutes)
+            && data.bufferAfterMinutes >= 0 && data.bufferAfterMinutes <= 120
+            ? data.bufferAfterMinutes : 15;
+          const existingBufferedStart = data.startAt.toMillis() - existingBefore * 60 * 1000;
+          const existingBufferedEnd = data.endAt.toMillis() + existingAfter * 60 * 1000;
+          return existingBufferedStart < bufferedEndAt.toMillis()
+            && existingBufferedEnd > bufferedStartAt.toMillis();
         });
         if (hasConflict) return false;
 
@@ -614,6 +633,8 @@ export const reserveWalkerForBooking = onCall(async (request) => {
           customerId: request.auth!.uid,
           startAt,
           endAt,
+          bufferBeforeMinutes: bufferMinutes,
+          bufferAfterMinutes: bufferMinutes,
           status: 'held',
           expiresAt: holdExpiresAt,
           createdAt: now,
