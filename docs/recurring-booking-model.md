@@ -2,7 +2,7 @@
 
 ## Status
 
-Design contract for the recurring-booking implementation. This document does not claim that recurring bookings are live. The current callable flow creates and pays for one booking at a time; do not expose recurring controls in the customer app until the series and occurrence lifecycle below is implemented and tested end to end.
+The backend now has an initial draft-only callable, `createRecurringBookingSeries`, that expands a selected schedule into a series document and individual booking drafts. It supports the initial `Asia/Kolkata` timezone, up to 31 calendar days and 30 occurrences, one or two distinct daily slots, and deterministic idempotency. It records candidate availability windows, not confirmed capacity. No walker is held, no payment is collected, and no series is confirmed. Do not expose recurring controls in the customer app until the full lifecycle below is implemented and tested end to end.
 
 ## Core model
 
@@ -21,9 +21,9 @@ A future callable (proposed name: `createRecurringBookingSeries`) must:
 2. Accept an explicit IANA timezone (for the initial launch, normally `Asia/Kolkata`); never interpret a date-only value using the server timezone.
 3. Accept selected weekdays and explicit time slots. Reject an empty selection, invalid dates, past occurrences, unsupported duration, excessive horizon, or an occurrence count over the configured safety cap.
 4. Expand the requested date range into deterministic occurrence keys (series ID + local date + slot ID). Repeated calls must be idempotent and must not create duplicate occurrences.
-5. Snapshot the active server-side pricing configuration for each occurrence. Admin price changes affect future quotes only; accepted occurrence quotes remain immutable.
+5. Snapshot the active server-side pricing configuration for each occurrence. The current callable snapshots the configured amount per occurrence. Admin price changes affect future quotes only; accepted occurrence quotes remain immutable.
 6. Create occurrence drafts only after validation. Do not claim the whole series is confirmed merely because drafts exist.
-7. Return per-occurrence results and clearly identify unavailable dates/times. A partial schedule must be shown as partial; never silently drop failed occurrences.
+7. Return per-occurrence results and clearly identify dates/times where no availability window candidate was found. A candidate is not a confirmed capacity slot: reservation transactions must recheck live overlap and eligibility. A partial schedule must be shown as partial; never silently drop failed occurrences.
 8. Require the owner to review and accept the occurrence-level total before any payment is collected. The server must calculate the total from occurrence quote snapshots; the client must not submit a trusted amount.
 9. Do not create one long reservation or assign one walker for the entire series.
 
@@ -64,9 +64,13 @@ Admin tools must support:
 - changing future price rules without mutating existing quote snapshots;
 - audit logging for every admin intervention.
 
+## Current implementation boundary
+
+The current callable requires a client-generated idempotency key and rejects reuse of that key with different schedule details. It validates real calendar dates, selected weekdays, unique slot IDs/times, and ensures two daily slots are separated by at least the requested walk duration. It creates at most 31 writes (one series plus 30 occurrence drafts) in a single transaction. Candidate availability is only a pre-screen based on configured availability windows; it does not query reservation conflicts and must never be presented as a confirmed slot.
+
 ## Safe rollout
 
-1. Implement and test timezone-safe occurrence expansion and deterministic idempotency keys.
+1. Add automated tests for timezone-safe occurrence expansion and deterministic idempotency keys.
 2. Add server-side series and occurrence creation with a strict horizon/count cap; no walker holds or payment in this first slice.
 3. Add customer review of the exact occurrence list and total, plus per-occurrence availability results.
 4. Add one-at-a-time reservation and explicit backup-consent handling for each occurrence.
