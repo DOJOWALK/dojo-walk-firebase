@@ -183,7 +183,7 @@ export const reserveWalkerForBooking = onCall(async (request) => {
       typeof id === 'string' && id.length > 0 && id.length <= 128)
     .slice(0, 100);
   const cityId = typeof booking.city === 'string' ? walkerCityConfig.get(booking.city) : undefined;
-  if (!cityId || typeof booking.pincode !== 'string' || !/^\\d{6}$/.test(booking.pincode)) {
+  if (!cityId || typeof booking.pincode !== 'string' || !/^\d{6}$/.test(booking.pincode)) {
     throw new HttpsError('failed-precondition', 'This booking has invalid service-area details.');
   }
   const coverageRef = db.doc(`serviceAreas/${cityId}/pincodes/${booking.pincode}`);
