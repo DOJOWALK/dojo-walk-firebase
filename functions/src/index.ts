@@ -1280,3 +1280,48 @@ export const setBookingPricing = onCall(async (request) => {
   };
 });
 
+export const getAdminServiceAreas = onCall(async (request) => {
+  if (!request.auth || request.auth.token.admin !== true) {
+    throw new HttpsError('permission-denied', 'Admin access is required.');
+  }
+  const cityEntries = [...walkerCityConfig.entries()];
+  const areas = await Promise.all(cityEntries.map(async ([city, cityId]) => {
+    const snapshot = await db.collection('serviceAreas').doc(cityId)
+      .collection('pincodes').get();
+    return snapshot.docs.map((doc) => ({
+      city,
+      pincode: doc.id,
+      enabled: doc.data().enabled === true,
+      walkerCount: Array.isArray(doc.data().walkerIds) ? doc.data().walkerIds.length : 0,
+    }));
+  }));
+  return { areas: areas.flat().sort((a, b) => a.city.localeCompare(b.city) || a.pincode.localeCompare(b.pincode)) };
+});
+
+export const setAdminServiceArea = onCall(async (request) => {
+  if (!request.auth || request.auth.token.admin !== true) {
+    throw new HttpsError('permission-denied', 'Admin access is required.');
+  }
+  const city = request.data?.city;
+  const pincode = request.data?.pincode;
+  const enabled = request.data?.enabled;
+  const cityId = typeof city === 'string' ? walkerCityConfig.get(city) : undefined;
+  if (!cityId || typeof pincode !== 'string' || !/^\\d{6}$/.test(pincode)
+      || typeof enabled !== 'boolean') {
+    throw new HttpsError('invalid-argument', 'Choose a supported city, valid 6-digit pincode and enabled state.');
+  }
+  const ref = db.collection('serviceAreas').doc(cityId).collection('pincodes').doc(pincode);
+  await db.runTransaction(async (tx) => {
+    const current = await tx.get(ref);
+    const existing = current.data() ?? {};
+    tx.set(ref, {
+      city,
+      enabled,
+      walkerIds: Array.isArray(existing.walkerIds) ? existing.walkerIds : [],
+      updatedAt: Timestamp.now(),
+      updatedBy: request.auth!.uid,
+    }, { merge: true });
+  });
+  return { city, pincode, enabled };
+});
+
