@@ -182,6 +182,11 @@ export const reserveWalkerForBooking = onCall(async (request) => {
     .filter((id: unknown): id is string =>
       typeof id === 'string' && id.length > 0 && id.length <= 128)
     .slice(0, 100);
+  const cityId = typeof booking.city === 'string' ? walkerCityConfig.get(booking.city) : undefined;
+  if (!cityId || typeof booking.pincode !== 'string' || !/^\\d{6}$/.test(booking.pincode)) {
+    throw new HttpsError('failed-precondition', 'This booking has invalid service-area details.');
+  }
+  const coverageRef = db.doc(`serviceAreas/${cityId}/pincodes/${booking.pincode}`);
 
   for (const walkerId of candidates) {
     const walkerRef = db.collection('walkers').doc(walkerId);
@@ -190,15 +195,22 @@ export const reserveWalkerForBooking = onCall(async (request) => {
 
     try {
       const result = await db.runTransaction(async (tx) => {
-        const [freshBooking, walkerSnap] = await Promise.all([
+        const [freshBooking, walkerSnap, coverageSnap] = await Promise.all([
           tx.get(bookingRef),
           tx.get(walkerRef),
+          tx.get(coverageRef),
         ]);
         if (!freshBooking.exists || freshBooking.data()?.customerId !== request.auth!.uid
             || freshBooking.data()?.status !== 'draft') {
           throw new HttpsError('failed-precondition', 'Booking is no longer available for reservation.');
         }
-        if (!walkerSnap.exists || walkerSnap.data()?.active !== true
+        const coverage = coverageSnap.data();
+        const coveredWalkerIds = Array.isArray(coverage?.walkerIds)
+          ? coverage.walkerIds.filter((id: unknown): id is string => typeof id === 'string')
+          : [];
+        if (!coverageSnap.exists || coverage?.enabled !== true
+            || coverage.city !== booking.city || !coveredWalkerIds.includes(walkerId)
+            || !walkerSnap.exists || walkerSnap.data()?.active !== true
             || !Array.isArray(walkerSnap.data()?.serviceablePincodes)
             || !walkerSnap.data()!.serviceablePincodes.includes(booking.pincode)) {
           return false;
