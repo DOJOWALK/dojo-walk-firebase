@@ -175,6 +175,270 @@ export const createBookingDraft = onCall(async (request) => {
 });
 
 
+const MAX_RECURRING_DAYS = 31;
+const MAX_RECURRING_OCCURRENCES = 30;
+const RECURRING_TIMEZONE = 'Asia/Kolkata';
+
+// The initial pilot deliberately supports the launch timezone only. This avoids
+// ambiguous/non-existent local times while the customer app is not yet exposing
+// recurring schedules. Every occurrence is still stored as an absolute Timestamp.
+function recurringLocalDateTimeToDate(localDate: string, localTime: string): Date {
+  const dateMatch = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(localDate);
+  const timeMatch = /^(\\d{2}):(\\d{2})$/.exec(localTime);
+  if (!dateMatch || !timeMatch) {
+    throw new HttpsError('invalid-argument', 'Use YYYY-MM-DD dates and HH:mm local times.');
+  }
+  const year = Number(dateMatch[1]);
+  const month = Number(dateMatch[2]);
+  const day = Number(dateMatch[3]);
+  const hour = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2]);
+  const calendarCheck = new Date(Date.UTC(year, month - 1, day));
+  if (calendarCheck.getUTCFullYear() !== year
+      || calendarCheck.getUTCMonth() !== month - 1
+      || calendarCheck.getUTCDate() !== day
+      || hour > 23 || minute > 59) {
+    throw new HttpsError('invalid-argument', 'A recurring date or local time is invalid.');
+  }
+  // Asia/Kolkata is UTC+05:30 year-round.
+  return new Date(Date.UTC(year, month - 1, day, hour, minute) - (330 * 60 * 1000));
+}
+
+export const createRecurringBookingSeries = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in before creating a recurring schedule.');
+  }
+  const data = request.data ?? {};
+  const idempotencyKey = typeof data.idempotencyKey === 'string'
+    ? data.idempotencyKey.trim() : '';
+  if (idempotencyKey.length < 8 || idempotencyKey.length > 100) {
+    throw new HttpsError('invalid-argument', 'A valid recurring request ID is required.');
+  }
+  if (data.timezone !== RECURRING_TIMEZONE) {
+    throw new HttpsError('invalid-argument', 'The initial recurring pilot supports Asia/Kolkata only.');
+  }
+  const { durationMinutes, address, petName, city, pincode, startDate, endDate } = data;
+  if (!Number.isInteger(durationMinutes) || !allowedDurations.has(durationMinutes)) {
+    throw new HttpsError('invalid-argument', 'Duration must be 30, 45, or 60 minutes.');
+  }
+  if (typeof city !== 'string' || !cityConfig.has(city)) {
+    throw new HttpsError('failed-precondition', 'This city is not in the initial launch area.');
+  }
+  if (typeof pincode !== 'string' || !/^\\d{6}$/.test(pincode)) {
+    throw new HttpsError('invalid-argument', 'Enter a valid 6-digit service pincode.');
+  }
+  if (typeof address !== 'string' || !address.trim() || address.trim().length > 500) {
+    throw new HttpsError('invalid-argument', 'Provide a walk address (up to 500 characters).');
+  }
+  if (typeof petName !== 'string' || !petName.trim() || petName.trim().length > 80) {
+    throw new HttpsError('invalid-argument', 'Provide a pet name (up to 80 characters).');
+  }
+  if (typeof startDate !== 'string' || typeof endDate !== 'string') {
+    throw new HttpsError('invalid-argument', 'Choose a recurring start date and end date.');
+  }
+  const startDateMatch = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(startDate);
+  const endDateMatch = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(endDate);
+  if (!startDateMatch || !endDateMatch) {
+    throw new HttpsError('invalid-argument', 'Use YYYY-MM-DD for recurring dates.');
+  }
+  const startDay = Date.UTC(Number(startDateMatch[1]), Number(startDateMatch[2]) - 1, Number(startDateMatch[3]));
+  const endDay = Date.UTC(Number(endDateMatch[1]), Number(endDateMatch[2]) - 1, Number(endDateMatch[3]));
+  const dayCount = Math.floor((endDay - startDay) / 86400000) + 1;
+  if (dayCount < 1 || dayCount > MAX_RECURRING_DAYS) {
+    throw new HttpsError('invalid-argument', 'A recurring request can cover at most 31 calendar days.');
+  }
+
+  const weekdays = Array.isArray(data.weekdays) ? data.weekdays : [];
+  if (weekdays.length === 0 || weekdays.length > 7
+      || weekdays.some((day: unknown) => !Number.isInteger(day) || (day as number) < 0 || (day as number) > 6)
+      || new Set(weekdays).size !== weekdays.length) {
+    throw new HttpsError('invalid-argument', 'Select one or more unique weekdays (0 Sunday to 6 Saturday).');
+  }
+  const slots = Array.isArray(data.timeSlots) ? data.timeSlots : [];
+  if (slots.length === 0 || slots.length > 2) {
+    throw new HttpsError('invalid-argument', 'Select one or two daily time slots.');
+  }
+  const normalizedSlots = slots.map((slot: any) => ({
+    id: typeof slot?.id === 'string' ? slot.id.trim() : '',
+    localTime: typeof slot?.localTime === 'string' ? slot.localTime.trim() : '',
+  }));
+  if (normalizedSlots.some((slot: {id: string; localTime: string}) =>
+      !/^[a-zA-Z0-9_-]{1,24}$/.test(slot.id)
+      || !/^([01]\\d|2[0-3]):[0-5]\\d$/.test(slot.localTime))
+      || new Set(normalizedSlots.map((slot: {id: string}) => slot.id)).size !== normalizedSlots.length) {
+    throw new HttpsError('invalid-argument', 'Each time slot needs a unique ID and valid 24-hour local time.');
+  }
+  if (typeof data.allowBackupWalker !== 'boolean') {
+    throw new HttpsError('invalid-argument', 'Backup walker consent must be explicitly selected.');
+  }
+
+  const selectedWeekdays = new Set<number>(weekdays as number[]);
+  const occurrences: Array<{localDate: string; slotId: string; localTime: string; scheduledAt: Date; endsAt: Date}> = [];
+  for (let offset = 0; offset < dayCount; offset++) {
+    const day = new Date(startDay + offset * 86400000);
+    if (!selectedWeekdays.has(day.getUTCDay())) continue;
+    const localDate = day.toISOString().slice(0, 10);
+    for (const slot of normalizedSlots) {
+      const scheduledAt = recurringLocalDateTimeToDate(localDate, slot.localTime);
+      if (scheduledAt.getTime() <= Date.now()) {
+        throw new HttpsError('invalid-argument', 'The recurring schedule contains a past walk time.');
+      }
+      occurrences.push({
+        localDate,
+        slotId: slot.id,
+        localTime: slot.localTime,
+        scheduledAt,
+        endsAt: new Date(scheduledAt.getTime() + durationMinutes * 60000),
+      });
+    }
+  }
+  if (occurrences.length === 0 || occurrences.length > MAX_RECURRING_OCCURRENCES) {
+    throw new HttpsError('invalid-argument',
+      'Choose dates and weekdays that create between 1 and 30 individual walks.');
+  }
+
+  // Prices are read from admin-managed configuration; no amount is hardcoded.
+  const pricingSnap = await db.collection('bookingPricing').doc(String(durationMinutes)).get();
+  const pricing = pricingSnap.data();
+  const amountPaise = pricing?.amountPaise;
+  if (pricing?.active !== true || !Number.isSafeInteger(amountPaise) || amountPaise <= 0) {
+    throw new HttpsError('failed-precondition',
+      'Pricing for this walk duration is not configured. Please contact DOJO WALK.');
+  }
+
+  const recentBookings = await db.collection('bookings')
+    .where('customerId', '==', request.auth.uid)
+    .orderBy('createdAt', 'desc')
+    .limit(50)
+    .get();
+  const primaryBooking = recentBookings.docs.find((doc) => {
+    const previous = doc.data();
+    return previous.petName === petName.trim()
+      && previous.pincode === pincode
+      && ['confirmed', 'completed'].includes(previous.status)
+      && typeof previous.walkerId === 'string';
+  });
+  const primaryWalkerId = primaryBooking?.data().walkerId as string | undefined;
+  const allowBackupWalker = data.allowBackupWalker === true;
+  const now = Timestamp.now();
+  const quoteExpiresAt = Timestamp.fromMillis(now.toMillis() + PRICE_QUOTE_MINUTES * 60000);
+
+  const prepared = await Promise.all(occurrences.map(async (occurrence) => {
+    const available = await findAvailableWalkers(
+      city, pincode, occurrence.scheduledAt, occurrence.endsAt,
+    );
+    const primaryAvailable = !!primaryWalkerId && available.includes(primaryWalkerId);
+    const eligibleWalkerIds = primaryWalkerId
+      ? [
+          ...(primaryAvailable ? [primaryWalkerId] : []),
+          ...(allowBackupWalker ? available.filter((id) => id !== primaryWalkerId) : []),
+        ]
+      : available;
+    const occurrenceKey = occurrence.localDate + '_' + occurrence.slotId;
+    const bookingId = createHash('sha256')
+      .update(request.auth!.uid + ':' + idempotencyKey + ':' + occurrenceKey)
+      .digest('hex').slice(0, 40);
+    return {
+      ...occurrence,
+      occurrenceKey,
+      bookingId,
+      eligibleWalkerIds,
+      availabilityStatus: eligibleWalkerIds.length > 0 ? 'available' : 'unavailable',
+    };
+  }));
+
+  // Stable series ID makes client retries idempotent. A transaction creates the
+  // series and its <=30 occurrence drafts atomically; no walker is held and no
+  // payment is collected by this callable.
+  const seriesId = createHash('sha256')
+    .update(request.auth.uid + ':' + idempotencyKey)
+    .digest('hex').slice(0, 40);
+  const seriesRef = db.collection('bookingSeries').doc(seriesId);
+  const bookingRefs = prepared.map((item) => db.collection('bookings').doc(item.bookingId));
+  const result = await db.runTransaction(async (tx) => {
+    const existing = await tx.get(seriesRef);
+    if (existing.exists) {
+      return {
+        created: false,
+        seriesId,
+        bookingIds: Array.isArray(existing.data()?.occurrenceBookingIds)
+          ? existing.data()!.occurrenceBookingIds as string[] : [],
+      };
+    }
+    const seriesData = {
+      customerId: request.auth!.uid,
+      timezone: RECURRING_TIMEZONE,
+      city,
+      pincode,
+      address: address.trim(),
+      petName: petName.trim(),
+      durationMinutes,
+      weekdays: [...selectedWeekdays].sort(),
+      timeSlots: normalizedSlots,
+      startDate,
+      endDate,
+      primaryWalkerId: primaryWalkerId ?? null,
+      allowBackupWalker,
+      backupConsentAt: allowBackupWalker ? now : null,
+      occurrenceBookingIds: prepared.map((item) => item.bookingId),
+      occurrenceCount: prepared.length,
+      availableOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length > 0).length,
+      unavailableOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length === 0).length,
+      status: 'draft',
+      createdAt: now,
+      updatedAt: now,
+    };
+    tx.create(seriesRef, seriesData);
+    prepared.forEach((item, index) => {
+      const bookingRef = bookingRefs[index];
+      tx.create(bookingRef, {
+        customerId: request.auth!.uid,
+        seriesId,
+        occurrenceKey: item.occurrenceKey,
+        localServiceDate: item.localDate,
+        localServiceTime: item.localTime,
+        timezone: RECURRING_TIMEZONE,
+        city,
+        pincode,
+        durationMinutes,
+        address: address.trim(),
+        petName: petName.trim(),
+        scheduledAt: Timestamp.fromDate(item.scheduledAt),
+        endsAt: Timestamp.fromDate(item.endsAt),
+        eligibleWalkerIds: item.eligibleWalkerIds,
+        primaryWalkerId: primaryWalkerId ?? null,
+        allowBackupWalker,
+        backupConsentAt: allowBackupWalker ? now : null,
+        availabilityStatus: item.availabilityStatus,
+        quotedAmountPaise: amountPaise,
+        quotedCurrency: 'INR',
+        pricingVersion: pricing.version ?? null,
+        pricingUpdatedAt: pricing.updatedAt instanceof Timestamp ? pricing.updatedAt : null,
+        quotedAt: now,
+        quoteExpiresAt,
+        status: 'draft',
+        paymentStatus: 'unpaid',
+        createdAt: now,
+      });
+    });
+    return { created: true, seriesId, bookingIds: prepared.map((item) => item.bookingId) };
+  });
+
+  return {
+    seriesId: result.seriesId,
+    created: result.created,
+    status: 'draft',
+    timezone: RECURRING_TIMEZONE,
+    occurrenceCount: result.bookingIds.length,
+    occurrenceBookingIds: result.bookingIds,
+    availableOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length > 0).length,
+    unavailableOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length === 0).length,
+    paymentCollected: false,
+    walkersReserved: false,
+  };
+});
+
+
 const HOLD_MINUTES = 10;
 const PRICE_QUOTE_MINUTES = 30;
 
