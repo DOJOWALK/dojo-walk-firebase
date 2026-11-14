@@ -764,6 +764,10 @@ export const listAdminBookings = onCall(async (request) => {
         bookingId: doc.id,
         customerId: data.customerId ?? '',
         walkerId: data.walkerId ?? null,
+        primaryWalkerId: data.primaryWalkerId ?? null,
+        allowBackupWalker: data.allowBackupWalker === true,
+        backupConsentAt: data.backupConsentAt instanceof Timestamp
+          ? data.backupConsentAt.toDate().toISOString() : null,
         petName: data.petName ?? '',
         city: data.city ?? '',
         pincode: data.pincode ?? '',
