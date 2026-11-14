@@ -437,6 +437,62 @@ export const saveWalkerAvailability = onCall(async (request) => {
   return { saved: parsed.length };
 });
 
+export const updateWalkerBookingStatus = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to update a walk.');
+  const uid = request.auth.uid;
+  const bookingId = request.data?.bookingId;
+  const action = request.data?.action;
+  if (typeof bookingId !== 'string' || !/^[A-Za-z0-9]{1,128}$/.test(bookingId)
+      || !['start', 'complete'].includes(action)) {
+    throw new HttpsError('invalid-argument', 'A valid booking and walk action are required.');
+  }
+  const walkerRef = db.collection('walkers').doc(uid);
+  const bookingRef = db.collection('bookings').doc(bookingId);
+  const now = Timestamp.now();
+  const result = await db.runTransaction(async (tx) => {
+    const [walkerSnap, bookingSnap] = await Promise.all([tx.get(walkerRef), tx.get(bookingRef)]);
+    if (!walkerSnap.exists || walkerSnap.data()?.active !== true
+        || walkerSnap.data()?.applicationStatus !== 'approved') {
+      throw new HttpsError('permission-denied', 'Only approved active walkers can update walks.');
+    }
+    if (!bookingSnap.exists || bookingSnap.data()?.walkerId !== uid) {
+      throw new HttpsError('not-found', 'This walk is not assigned to your account.');
+    }
+    const booking = bookingSnap.data()!;
+    if (!(booking.scheduledAt instanceof Timestamp) || !(booking.endsAt instanceof Timestamp)) {
+      throw new HttpsError('failed-precondition', 'This booking has invalid schedule details.');
+    }
+    if (action === 'start') {
+      if (booking.status !== 'confirmed') {
+        throw new HttpsError('failed-precondition', 'Only confirmed walks can be started.');
+      }
+      const earliest = booking.scheduledAt.toMillis() - 30 * 60 * 1000;
+      const latest = booking.endsAt.toMillis() + 2 * 60 * 60 * 1000;
+      if (now.toMillis() < earliest || now.toMillis() > latest) {
+        throw new HttpsError('failed-precondition', 'You can start this walk from 30 minutes before its scheduled time until 2 hours after its planned end.');
+      }
+      tx.update(bookingRef, { status: 'in_progress', startedAt: now, updatedAt: now });
+      return 'in_progress';
+    }
+    if (booking.status !== 'in_progress' || !(booking.startedAt instanceof Timestamp)) {
+      throw new HttpsError('failed-precondition', 'Only an in-progress walk can be completed.');
+    }
+    if (now.toMillis() < booking.startedAt.toMillis() + 5 * 60 * 1000) {
+      throw new HttpsError('failed-precondition', 'A walk must be in progress for at least 5 minutes before it can be completed.');
+    }
+    tx.update(bookingRef, { status: 'completed', completedAt: now, updatedAt: now });
+    if (typeof booking.reservationId === 'string') {
+      const reservationRef = walkerRef.collection('reservations').doc(booking.reservationId);
+      const reservationSnap = await tx.get(reservationRef);
+      if (reservationSnap.exists) {
+        tx.update(reservationRef, { status: 'completed', completedAt: now });
+      }
+    }
+    return 'completed';
+  });
+  return { bookingId, status: result };
+});
+
 export const getWalkerDashboard = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to view walker dashboard.');
   const uid = request.auth.uid;
@@ -446,13 +502,22 @@ export const getWalkerDashboard = onCall(async (request) => {
     throw new HttpsError('permission-denied', 'Walker account is not approved and active.');
   }
   const now = Timestamp.now();
-  const bookingsSnap = await db.collection('bookings')
-    .where('walkerId', '==', uid)
-    .where('status', '==', 'confirmed')
-    .where('scheduledAt', '>=', now)
-    .orderBy('scheduledAt', 'asc')
-    .limit(50)
-    .get();
+  const [upcomingSnap, activeSnap] = await Promise.all([
+    db.collection('bookings')
+      .where('walkerId', '==', uid)
+      .where('status', '==', 'confirmed')
+      .where('scheduledAt', '>=', now)
+      .orderBy('scheduledAt', 'asc')
+      .limit(50)
+      .get(),
+    db.collection('bookings')
+      .where('walkerId', '==', uid)
+      .where('status', '==', 'in_progress')
+      .orderBy('scheduledAt', 'asc')
+      .limit(20)
+      .get(),
+  ]);
+  const bookingDocs = [...activeSnap.docs, ...upcomingSnap.docs];
   const windowsSnap = await db.collection('walkers').doc(uid)
     .collection('availabilityWindows')
     .where('status', '==', 'available')
@@ -466,7 +531,7 @@ export const getWalkerDashboard = onCall(async (request) => {
       city: walkerSnap.data()?.applicationCity ?? '',
       pincode: walkerSnap.data()?.applicationPincode ?? '',
     },
-    bookings: bookingsSnap.docs.map((doc) => {
+    bookings: bookingDocs.map((doc) => {
       const data = doc.data();
       return {
         bookingId: doc.id,
@@ -477,7 +542,7 @@ export const getWalkerDashboard = onCall(async (request) => {
         durationMinutes: data.durationMinutes ?? 0,
         scheduledAt: data.scheduledAt instanceof Timestamp ? data.scheduledAt.toDate().toISOString() : null,
         endsAt: data.endsAt instanceof Timestamp ? data.endsAt.toDate().toISOString() : null,
-        paymentStatus: data.paymentStatus ?? '',
+        paymentStatus: data.paymentStatus ?? '',\n        status: data.status ?? 'confirmed',\n        startedAt: data.startedAt instanceof Timestamp ? data.startedAt.toDate().toISOString() : null,
       };
     }),
     availability: windowsSnap.docs.map((doc) => {
