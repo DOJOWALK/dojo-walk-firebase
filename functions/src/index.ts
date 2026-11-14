@@ -575,6 +575,8 @@ export const getWalkerDashboard = onCall(async (request) => {
         city: data.city ?? '',
         pincode: data.pincode ?? '',
         durationMinutes: data.durationMinutes ?? 0,
+        quotedAmountPaise: Number.isSafeInteger(data.quotedAmountPaise) ? data.quotedAmountPaise : null,
+        quotedCurrency: data.quotedCurrency ?? 'INR',
         scheduledAt: data.scheduledAt instanceof Timestamp ? data.scheduledAt.toDate().toISOString() : null,
         endsAt: data.endsAt instanceof Timestamp ? data.endsAt.toDate().toISOString() : null,
         paymentStatus: data.paymentStatus ?? '',
