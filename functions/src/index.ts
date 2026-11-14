@@ -1306,7 +1306,7 @@ export const setAdminServiceArea = onCall(async (request) => {
   const pincode = request.data?.pincode;
   const enabled = request.data?.enabled;
   const cityId = typeof city === 'string' ? walkerCityConfig.get(city) : undefined;
-  if (!cityId || typeof pincode !== 'string' || !/^\\d{6}$/.test(pincode)
+  if (!cityId || typeof pincode !== 'string' || !/^\d{6}$/.test(pincode)
       || typeof enabled !== 'boolean') {
     throw new HttpsError('invalid-argument', 'Choose a supported city, valid 6-digit pincode and enabled state.');
   }
