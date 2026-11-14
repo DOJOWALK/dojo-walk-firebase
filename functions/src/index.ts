@@ -1371,6 +1371,33 @@ export const setBookingPricing = onCall(async (request) => {
   };
 });
 
+export const getPricingAuditLogs = onCall(async (request) => {
+  if (!request.auth || request.auth.token.admin !== true) {
+    throw new HttpsError('permission-denied', 'Admin access is required.');
+  }
+  const snapshot = await db.collection('pricingAuditLogs')
+    .orderBy('changedAt', 'desc')
+    .limit(50)
+    .get();
+  return {
+    logs: snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        durationMinutes: data.durationMinutes ?? 0,
+        previousAmountPaise: data.previousAmountPaise ?? null,
+        newAmountPaise: data.newAmountPaise ?? 0,
+        previousActive: data.previousActive === true,
+        newActive: data.newActive === true,
+        version: data.version ?? 1,
+        changedAt: data.changedAt instanceof Timestamp
+          ? data.changedAt.toDate().toISOString() : null,
+        changedBy: data.changedBy ?? '',
+      };
+    }),
+  };
+});
+
 export const getAdminServiceAreas = onCall(async (request) => {
   if (!request.auth || request.auth.token.admin !== true) {
     throw new HttpsError('permission-denied', 'Admin access is required.');
