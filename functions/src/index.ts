@@ -270,7 +270,7 @@ export const createRecurringBookingSeries = onCall(async (request) => {
     Number(slot.localTime.slice(0, 2)) * 60 + Number(slot.localTime.slice(3)));
   if (normalizedSlots.some((slot: {id: string; localTime: string}) =>
       !/^[a-zA-Z0-9_-]{1,24}$/.test(slot.id)
-      || !/^([01]\\d|2[0-3]):[0-5]\\d$/.test(slot.localTime))
+      || !/^([01]\d|2[0-3]):[0-5]\d$/.test(slot.localTime))
       || new Set(normalizedSlots.map((slot: {id: string}) => slot.id)).size !== normalizedSlots.length
       || new Set(normalizedSlots.map((slot: {localTime: string}) => slot.localTime)).size !== normalizedSlots.length
       || (slotMinutes.length === 2 && Math.abs(slotMinutes[0] - slotMinutes[1]) < durationMinutes)) {
@@ -1074,6 +1074,56 @@ export const listAdminBookings = onCall(async (request) => {
   };
 });
 
+
+export const getCustomerBookingSeries = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in to view your recurring schedules.');
+  }
+  const seriesId = request.data?.seriesId;
+  if (typeof seriesId !== 'string' || !/^[a-f0-9]{40}$/.test(seriesId)) {
+    throw new HttpsError('invalid-argument', 'A valid recurring schedule ID is required.');
+  }
+  const seriesSnap = await db.collection('bookingSeries').doc(seriesId).get();
+  if (!seriesSnap.exists || seriesSnap.data()?.customerId !== request.auth.uid) {
+    throw new HttpsError('not-found', 'Recurring schedule was not found.');
+  }
+  const series = seriesSnap.data()!;
+  const occurrenceIds = Array.isArray(series.occurrenceBookingIds)
+    ? series.occurrenceBookingIds.filter((id: unknown): id is string =>
+        typeof id === 'string' && /^[a-f0-9]{40}$/.test(id)).slice(0, MAX_RECURRING_OCCURRENCES)
+    : [];
+  const snapshots = await Promise.all(occurrenceIds.map((id) =>
+    db.collection('bookings').doc(id).get()));
+  return {
+    seriesId,
+    status: series.status ?? 'draft',
+    timezone: series.timezone ?? RECURRING_TIMEZONE,
+    city: series.city ?? '',
+    petName: series.petName ?? '',
+    durationMinutes: series.durationMinutes ?? 0,
+    occurrenceCount: series.occurrenceCount ?? occurrenceIds.length,
+    candidateOccurrenceCount: series.candidateOccurrenceCount ?? 0,
+    noCandidateWindowCount: series.noCandidateWindowCount ?? 0,
+    paymentCollected: false,
+    walkersReserved: false,
+    occurrences: snapshots.filter((snap) => snap.exists
+      && snap.data()?.customerId === request.auth!.uid).map((snap) => {
+        const item = snap.data()!;
+        return {
+          bookingId: snap.id,
+          localServiceDate: item.localServiceDate ?? '',
+          localServiceTime: item.localServiceTime ?? '',
+          durationMinutes: item.durationMinutes ?? 0,
+          status: item.status ?? 'unknown',
+          paymentStatus: item.paymentStatus ?? 'unpaid',
+          availabilityStatus: item.availabilityStatus ?? 'unknown',
+          quotedAmountPaise: item.quotedAmountPaise ?? null,
+        };
+      }).sort((left, right) =>
+        (left.localServiceDate + left.localServiceTime)
+          .localeCompare(right.localServiceDate + right.localServiceTime)),
+  };
+});
 
 export const listAdminBookingSeries = onCall(async (request) => {
   if (!request.auth || request.auth.token.admin !== true) {
