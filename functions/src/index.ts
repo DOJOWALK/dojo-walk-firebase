@@ -627,6 +627,36 @@ export const listPendingWalkerApplications = onCall(async (request) => {
   };
 });
 
+export const listAdminBookings = onCall(async (request) => {
+  if (!request.auth || request.auth.token.admin !== true) {
+    throw new HttpsError('permission-denied', 'Admin access is required.');
+  }
+  const snap = await db.collection('bookings')
+    .orderBy('createdAt', 'desc')
+    .limit(100)
+    .get();
+  return {
+    bookings: snap.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        bookingId: doc.id,
+        customerId: data.customerId ?? '',
+        walkerId: data.walkerId ?? null,
+        petName: data.petName ?? '',
+        city: data.city ?? '',
+        pincode: data.pincode ?? '',
+        address: data.address ?? '',
+        durationMinutes: data.durationMinutes ?? 0,
+        scheduledAt: data.scheduledAt instanceof Timestamp ? data.scheduledAt.toDate().toISOString() : null,
+        status: data.status ?? 'unknown',
+        paymentStatus: data.paymentStatus ?? 'unpaid',
+        paymentReviewRequired: data.paymentReviewRequired === true,
+        createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : null,
+      };
+    }),
+  };
+});
+
 export const reviewWalkerApplication = onCall(async (request) => {
   if (!request.auth || request.auth.token.admin !== true) {
     throw new HttpsError('permission-denied', 'Admin access is required.');
