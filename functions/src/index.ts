@@ -480,13 +480,12 @@ export const updateWalkerBookingStatus = onCall(async (request) => {
     if (now.toMillis() < booking.startedAt.toMillis() + 5 * 60 * 1000) {
       throw new HttpsError('failed-precondition', 'A walk must be in progress for at least 5 minutes before it can be completed.');
     }
+    const reservationRef = typeof booking.reservationId === 'string'
+      ? walkerRef.collection('reservations').doc(booking.reservationId) : null;
+    const reservationSnap = reservationRef ? await tx.get(reservationRef) : null;
     tx.update(bookingRef, { status: 'completed', completedAt: now, updatedAt: now });
-    if (typeof booking.reservationId === 'string') {
-      const reservationRef = walkerRef.collection('reservations').doc(booking.reservationId);
-      const reservationSnap = await tx.get(reservationRef);
-      if (reservationSnap.exists) {
-        tx.update(reservationRef, { status: 'completed', completedAt: now });
-      }
+    if (reservationRef && reservationSnap?.exists) {
+      tx.update(reservationRef, { status: 'completed', completedAt: now });
     }
     return 'completed';
   });
