@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase-admin/app';
-import { getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { getFirestore, Timestamp, DocumentReference, DocumentSnapshot } from 'firebase-admin/firestore';
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
 import { createHmac, createHash, timingSafeEqual } from 'node:crypto';
@@ -576,8 +576,8 @@ export const cancelCustomerBooking = onCall(async (request) => {
       throw new HttpsError('failed-precondition',
         'Only unpaid bookings before payment confirmation can be cancelled in the app. Please contact support for paid bookings.');
     }
-    let reservationRef: FirebaseFirestore.DocumentReference | null = null;
-    let reservationSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+    let reservationRef: DocumentReference | null = null;
+    let reservationSnap: DocumentSnapshot | null = null;
     if (typeof booking.walkerId === 'string' && typeof booking.reservationId === 'string') {
       reservationRef = db.collection('walkers').doc(booking.walkerId)
         .collection('reservations').doc(booking.reservationId);
