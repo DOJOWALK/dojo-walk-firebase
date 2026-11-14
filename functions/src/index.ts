@@ -222,6 +222,21 @@ export const reserveWalkerForBooking = onCall(async (request) => {
             || freshBooking.data()?.status !== 'draft') {
           throw new HttpsError('failed-precondition', 'Booking is no longer available for reservation.');
         }
+        // Use the transaction's fresh booking snapshot for every scheduling and
+        // eligibility decision. The earlier read is only for candidate discovery;
+        // it must never authorize a hold after the draft has been edited.
+        const freshData = freshBooking.data()!;
+        const freshEligibleIds = Array.isArray(freshData.eligibleWalkerIds)
+          ? freshData.eligibleWalkerIds : [];
+        if (!(freshData.scheduledAt instanceof Timestamp)
+            || !(freshData.endsAt instanceof Timestamp)
+            || freshData.scheduledAt.toMillis() <= Date.now()
+            || freshData.city !== booking.city
+            || freshData.pincode !== booking.pincode
+            || !freshEligibleIds.includes(walkerId)) {
+          throw new HttpsError('failed-precondition',
+            'Booking details or walker eligibility changed. Please check availability again.');
+        }
         const coverage = coverageSnap.data();
         const coveredWalkerIds = Array.isArray(coverage?.walkerIds)
           ? coverage.walkerIds.filter((id: unknown): id is string => typeof id === 'string')
@@ -234,8 +249,8 @@ export const reserveWalkerForBooking = onCall(async (request) => {
           return false;
         }
 
-        const startAt = booking.scheduledAt as Timestamp;
-        const endAt = booking.endsAt as Timestamp;
+        const startAt = freshData.scheduledAt as Timestamp;
+        const endAt = freshData.endsAt as Timestamp;
         const windowsQuery = walkerRef.collection('availabilityWindows')
           .where('status', '==', 'available')
           .where('startAt', '<=', startAt)
