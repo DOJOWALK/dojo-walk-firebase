@@ -2,7 +2,7 @@
 
 ## Status
 
-The backend has `createRecurringBookingSeries`, which expands a selected schedule into a series document and individual booking drafts. It supports `Asia/Kolkata`, up to 31 calendar days and 30 occurrences, one or two distinct daily slots, and deterministic idempotency. The customer app can review the occurrence list and individually initiate a draft occurrence: `refreshRecurringOccurrenceQuote` snapshots the current admin-managed price, the customer explicitly accepts it, `reserveWalkerForBooking` rechecks capacity transactionally, and the existing Razorpay flow handles payment for that one booking only. The series itself is never bulk-reserved or bulk-paid. Candidate availability windows remain indicative, not confirmed capacity.
+The backend has `createRecurringBookingSeries`, which expands a selected schedule into a series document and individual booking drafts. It supports `Asia/Kolkata`, up to 31 calendar days and 30 occurrences, one or two distinct daily slots, and deterministic idempotency. The customer app can review the occurrence list, revisit the latest ten customer-owned recurring schedules through `listCustomerBookingSeries`, and individually initiate a draft occurrence: `refreshRecurringOccurrenceQuote` snapshots the current admin-managed price, the customer explicitly accepts it, `reserveWalkerForBooking` rechecks capacity transactionally, and the existing Razorpay flow handles payment for that one booking only. The series itself is never bulk-reserved or bulk-paid. Candidate availability windows remain indicative, not confirmed capacity.
 
 ## Core model
 
@@ -66,7 +66,7 @@ Admin tools must support:
 
 ## Current implementation boundary
 
-The current callable requires a client-generated idempotency key and rejects reuse of that key with different schedule details. It validates real calendar dates, selected weekdays, unique slot IDs/times, and ensures two daily slots are separated by at least the requested walk duration. It creates at most 31 writes (one series plus 30 occurrence drafts) in a single transaction. Candidate availability is only a pre-screen based on configured availability windows; it does not query reservation conflicts and must never be presented as a confirmed slot. `refreshRecurringOccurrenceQuote` may update the quote only while the occurrence is an unpaid future draft owned by the caller. `reserveWalkerForBooking` now rejects an expired quote before placing a hold, avoiding a walker hold that cannot proceed to payment.
+The customer-owned series history query is backed by a Firestore composite index on `bookingSeries.customerId` and descending `createdAt`. The current callable requires a client-generated idempotency key and rejects reuse of that key with different schedule details. It validates real calendar dates, selected weekdays, unique slot IDs/times, and ensures two daily slots are separated by at least the requested walk duration. It creates at most 31 writes (one series plus 30 occurrence drafts) in a single transaction. Candidate availability is only a pre-screen based on configured availability windows; it does not query reservation conflicts and must never be presented as a confirmed slot. `refreshRecurringOccurrenceQuote` may update the quote only while the occurrence is an unpaid future draft owned by the caller. `reserveWalkerForBooking` now rejects an expired quote before placing a hold, avoiding a walker hold that cannot proceed to payment.
 
 ## Safe rollout
 
