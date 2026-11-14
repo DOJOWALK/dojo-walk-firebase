@@ -557,6 +557,41 @@ export const getWalkerDashboard = onCall(async (request) => {
   };
 });
 
+export const cancelCustomerBooking = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to cancel a booking.');
+  const bookingId = request.data?.bookingId;
+  if (typeof bookingId !== 'string' || !/^[A-Za-z0-9]{1,128}$/.test(bookingId)) {
+    throw new HttpsError('invalid-argument', 'A valid booking ID is required.');
+  }
+  const bookingRef = db.collection('bookings').doc(bookingId);
+  const now = Timestamp.now();
+  await db.runTransaction(async (tx) => {
+    const bookingSnap = await tx.get(bookingRef);
+    if (!bookingSnap.exists || bookingSnap.data()?.customerId !== request.auth!.uid) {
+      throw new HttpsError('not-found', 'Booking was not found.');
+    }
+    const booking = bookingSnap.data()!;
+    if (!['draft', 'walker_held'].includes(booking.status)
+        || booking.paymentStatus !== 'unpaid') {
+      throw new HttpsError('failed-precondition',
+        'Only unpaid bookings before payment confirmation can be cancelled in the app. Please contact support for paid bookings.');
+    }
+    let reservationRef: FirebaseFirestore.DocumentReference | null = null;
+    let reservationSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+    if (typeof booking.walkerId === 'string' && typeof booking.reservationId === 'string') {
+      reservationRef = db.collection('walkers').doc(booking.walkerId)
+        .collection('reservations').doc(booking.reservationId);
+      reservationSnap = await tx.get(reservationRef);
+    }
+    tx.update(bookingRef, { status: 'cancelled', cancelledAt: now, updatedAt: now });
+    if (reservationRef && reservationSnap?.exists
+        && ['held', 'confirmed'].includes(reservationSnap.data()?.status)) {
+      tx.update(reservationRef, { status: 'cancelled', cancelledAt: now, updatedAt: now });
+    }
+  });
+  return { bookingId, status: 'cancelled' };
+});
+
 export const getCustomerBookings = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to view your bookings.');
   const snap = await db.collection('bookings')
