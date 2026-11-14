@@ -586,6 +586,15 @@ export const reserveWalkerForBooking = onCall(async (request) => {
   if (booking.scheduledAt.toMillis() <= Date.now()) {
     throw new HttpsError('failed-precondition', 'The requested walk time has passed.');
   }
+  // Do not place a walker hold against a price the customer can no longer
+  // accept. Legacy drafts without quote fields retain the payment-time
+  // compatibility path below.
+  if (booking.quotedAmountPaise !== undefined
+      && (!(booking.quoteExpiresAt instanceof Timestamp)
+        || booking.quoteExpiresAt.toMillis() <= Date.now())) {
+    throw new HttpsError('failed-precondition',
+      'This price quote has expired. Refresh the price before checking walker availability.');
+  }
 
   const candidates = booking.eligibleWalkerIds
     .filter((id: unknown): id is string =>
