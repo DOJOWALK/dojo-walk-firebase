@@ -1221,6 +1221,50 @@ export const getCustomerBookingSeries = onCall(async (request) => {
   };
 });
 
+export const listCustomerBookingSeries = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in to view your recurring schedules.');
+  }
+  const seriesSnapshot = await db.collection('bookingSeries')
+    .where('customerId', '==', request.auth.uid)
+    .orderBy('createdAt', 'desc')
+    .limit(10)
+    .get();
+  const series = await Promise.all(seriesSnapshot.docs.map(async (seriesDoc) => {
+    const data = seriesDoc.data();
+    const occurrenceIds = Array.isArray(data.occurrenceBookingIds)
+      ? data.occurrenceBookingIds.filter((id: unknown): id is string =>
+          typeof id === 'string' && /^[a-f0-9]{40}$/.test(id)).slice(0, MAX_RECURRING_OCCURRENCES)
+      : [];
+    const snapshots = await Promise.all(occurrenceIds.map((id) =>
+      db.collection('bookings').doc(id).get()));
+    return {
+      seriesId: seriesDoc.id,
+      petName: data.petName ?? '',
+      city: data.city ?? '',
+      status: data.status ?? 'draft',
+      createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : null,
+      occurrences: snapshots.filter((snap) => snap.exists
+        && snap.data()?.customerId === request.auth!.uid).map((snap) => {
+          const item = snap.data()!;
+          return {
+            bookingId: snap.id,
+            localServiceDate: item.localServiceDate ?? '',
+            localServiceTime: item.localServiceTime ?? '',
+            durationMinutes: item.durationMinutes ?? 0,
+            status: item.status ?? 'unknown',
+            paymentStatus: item.paymentStatus ?? 'unpaid',
+            availabilityStatus: item.availabilityStatus ?? 'unknown',
+            quotedAmountPaise: item.quotedAmountPaise ?? null,
+          };
+        }).sort((left, right) =>
+          (left.localServiceDate + left.localServiceTime)
+            .localeCompare(right.localServiceDate + right.localServiceTime)),
+    };
+  }));
+  return { series };
+});
+
 export const listAdminBookingSeries = onCall(async (request) => {
   if (!request.auth || request.auth.token.admin !== true) {
     throw new HttpsError('permission-denied', 'Admin access is required.');
