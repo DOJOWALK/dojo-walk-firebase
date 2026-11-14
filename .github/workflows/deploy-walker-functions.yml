@@ -39,9 +39,9 @@ jobs:
       - name: Compile TypeScript
         working-directory: functions
         run: npm run build
-      - name: Deploy walker application and dashboard functions only
+      - name: Deploy booking, customer, walker and admin operations functions (excluding payment functions)
         run: >-
           firebase deploy
-          --only functions:submitWalkerApplication,functions:getWalkerApplication,functions:listPendingWalkerApplications,functions:reviewWalkerApplication,functions:saveWalkerAvailability,functions:getWalkerDashboard
+          --only functions:createBookingDraft,functions:reserveWalkerForBooking,functions:releaseWalkerHold,functions:submitWalkerApplication,functions:getWalkerApplication,functions:listPendingWalkerApplications,functions:reviewWalkerApplication,functions:saveWalkerAvailability,functions:updateWalkerBookingStatus,functions:getWalkerDashboard,functions:cancelCustomerBooking,functions:getCustomerBookings,functions:listAdminBookings,functions:getBookingPricing,functions:setBookingPricing,functions:getAdminServiceAreas,functions:setAdminServiceArea
           --project dojo-platform-b68a3
           --non-interactive
