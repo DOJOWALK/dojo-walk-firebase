@@ -347,7 +347,7 @@ export const createRecurringBookingSeries = onCall(async (request) => {
       occurrenceKey,
       bookingId,
       eligibleWalkerIds,
-      availabilityStatus: eligibleWalkerIds.length > 0 ? 'available' : 'unavailable',
+      availabilityStatus: eligibleWalkerIds.length > 0 ? 'candidate_found' : 'no_candidate_window',
     };
   }));
 
@@ -357,22 +357,32 @@ export const createRecurringBookingSeries = onCall(async (request) => {
   const seriesId = createHash('sha256')
     .update(request.auth.uid + ':' + idempotencyKey)
     .digest('hex').slice(0, 40);
+  const requestFingerprint = createHash('sha256').update(JSON.stringify({
+    durationMinutes, address: address.trim(), petName: petName.trim(), city, pincode,
+    startDate, endDate, weekdays: [...selectedWeekdays].sort(), timeSlots: normalizedSlots,
+    allowBackupWalker, timezone: RECURRING_TIMEZONE,
+  })).digest('hex');
   const seriesRef = db.collection('bookingSeries').doc(seriesId);
   const bookingRefs = prepared.map((item) => db.collection('bookings').doc(item.bookingId));
   const result = await db.runTransaction(async (tx) => {
     const existing = await tx.get(seriesRef);
     if (existing.exists) {
+      if (existing.data()?.requestFingerprint !== requestFingerprint) {
+        throw new HttpsError('failed-precondition',
+          'This recurring request ID was already used with different schedule details.');
+      }
       return {
         created: false,
         seriesId,
         bookingIds: Array.isArray(existing.data()?.occurrenceBookingIds)
           ? existing.data()!.occurrenceBookingIds as string[] : [],
-        availableOccurrenceCount: existing.data()?.availableOccurrenceCount ?? 0,
-        unavailableOccurrenceCount: existing.data()?.unavailableOccurrenceCount ?? 0,
+        candidateOccurrenceCount: existing.data()?.candidateOccurrenceCount ?? 0,
+        uncandidateOccurrenceCount: existing.data()?.uncandidateOccurrenceCount ?? 0,
       };
     }
     const seriesData = {
       customerId: request.auth!.uid,
+      requestFingerprint,
       timezone: RECURRING_TIMEZONE,
       city,
       pincode,
@@ -388,8 +398,8 @@ export const createRecurringBookingSeries = onCall(async (request) => {
       backupConsentAt: allowBackupWalker ? now : null,
       occurrenceBookingIds: prepared.map((item) => item.bookingId),
       occurrenceCount: prepared.length,
-      availableOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length > 0).length,
-      unavailableOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length === 0).length,
+      candidateOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length > 0).length,
+      uncandidateOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length === 0).length,
       status: 'draft',
       createdAt: now,
       updatedAt: now,
@@ -431,8 +441,8 @@ export const createRecurringBookingSeries = onCall(async (request) => {
       created: true,
       seriesId,
       bookingIds: prepared.map((item) => item.bookingId),
-      availableOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length > 0).length,
-      unavailableOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length === 0).length,
+      candidateOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length > 0).length,
+      uncandidateOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length === 0).length,
     };
   });
 
@@ -443,8 +453,8 @@ export const createRecurringBookingSeries = onCall(async (request) => {
     timezone: RECURRING_TIMEZONE,
     occurrenceCount: result.bookingIds.length,
     occurrenceBookingIds: result.bookingIds,
-    availableOccurrenceCount: result.availableOccurrenceCount,
-    unavailableOccurrenceCount: result.unavailableOccurrenceCount,
+    candidateOccurrenceCount: result.candidateOccurrenceCount,
+    uncandidateOccurrenceCount: result.uncandidateOccurrenceCount,
     paymentCollected: false,
     walkersReserved: false,
   };
