@@ -541,7 +541,9 @@ export const getWalkerDashboard = onCall(async (request) => {
         durationMinutes: data.durationMinutes ?? 0,
         scheduledAt: data.scheduledAt instanceof Timestamp ? data.scheduledAt.toDate().toISOString() : null,
         endsAt: data.endsAt instanceof Timestamp ? data.endsAt.toDate().toISOString() : null,
-        paymentStatus: data.paymentStatus ?? '',\n        status: data.status ?? 'confirmed',\n        startedAt: data.startedAt instanceof Timestamp ? data.startedAt.toDate().toISOString() : null,
+        paymentStatus: data.paymentStatus ?? '',
+        status: data.status ?? 'confirmed',
+        startedAt: data.startedAt instanceof Timestamp ? data.startedAt.toDate().toISOString() : null,
       };
     }),
     availability: windowsSnap.docs.map((doc) => {
