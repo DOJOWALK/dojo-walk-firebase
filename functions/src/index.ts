@@ -266,11 +266,16 @@ export const createRecurringBookingSeries = onCall(async (request) => {
     id: typeof slot?.id === 'string' ? slot.id.trim() : '',
     localTime: typeof slot?.localTime === 'string' ? slot.localTime.trim() : '',
   }));
+  const slotMinutes = normalizedSlots.map((slot: {localTime: string}) =>
+    Number(slot.localTime.slice(0, 2)) * 60 + Number(slot.localTime.slice(3)));
   if (normalizedSlots.some((slot: {id: string; localTime: string}) =>
       !/^[a-zA-Z0-9_-]{1,24}$/.test(slot.id)
-      || !/^([01]\d|2[0-3]):[0-5]\d$/.test(slot.localTime))
-      || new Set(normalizedSlots.map((slot: {id: string}) => slot.id)).size !== normalizedSlots.length) {
-    throw new HttpsError('invalid-argument', 'Each time slot needs a unique ID and valid 24-hour local time.');
+      || !/^([01]\\d|2[0-3]):[0-5]\\d$/.test(slot.localTime))
+      || new Set(normalizedSlots.map((slot: {id: string}) => slot.id)).size !== normalizedSlots.length
+      || new Set(normalizedSlots.map((slot: {localTime: string}) => slot.localTime)).size !== normalizedSlots.length
+      || (slotMinutes.length === 2 && Math.abs(slotMinutes[0] - slotMinutes[1]) < durationMinutes)) {
+    throw new HttpsError('invalid-argument',
+      'Time slots must be unique and separated by at least the walk duration.');
   }
   if (typeof data.allowBackupWalker !== 'boolean') {
     throw new HttpsError('invalid-argument', 'Backup walker consent must be explicitly selected.');
@@ -377,7 +382,7 @@ export const createRecurringBookingSeries = onCall(async (request) => {
         bookingIds: Array.isArray(existing.data()?.occurrenceBookingIds)
           ? existing.data()!.occurrenceBookingIds as string[] : [],
         candidateOccurrenceCount: existing.data()?.candidateOccurrenceCount ?? 0,
-        uncandidateOccurrenceCount: existing.data()?.uncandidateOccurrenceCount ?? 0,
+        noCandidateWindowCount: existing.data()?.noCandidateWindowCount ?? 0,
       };
     }
     const seriesData = {
@@ -399,7 +404,7 @@ export const createRecurringBookingSeries = onCall(async (request) => {
       occurrenceBookingIds: prepared.map((item) => item.bookingId),
       occurrenceCount: prepared.length,
       candidateOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length > 0).length,
-      uncandidateOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length === 0).length,
+      noCandidateWindowCount: prepared.filter((item) => item.eligibleWalkerIds.length === 0).length,
       status: 'draft',
       createdAt: now,
       updatedAt: now,
@@ -442,7 +447,7 @@ export const createRecurringBookingSeries = onCall(async (request) => {
       seriesId,
       bookingIds: prepared.map((item) => item.bookingId),
       candidateOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length > 0).length,
-      uncandidateOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length === 0).length,
+      noCandidateWindowCount: prepared.filter((item) => item.eligibleWalkerIds.length === 0).length,
     };
   });
 
@@ -454,7 +459,7 @@ export const createRecurringBookingSeries = onCall(async (request) => {
     occurrenceCount: result.bookingIds.length,
     occurrenceBookingIds: result.bookingIds,
     candidateOccurrenceCount: result.candidateOccurrenceCount,
-    uncandidateOccurrenceCount: result.uncandidateOccurrenceCount,
+    noCandidateWindowCount: result.noCandidateWindowCount,
     paymentCollected: false,
     walkersReserved: false,
   };
