@@ -183,8 +183,8 @@ const RECURRING_TIMEZONE = 'Asia/Kolkata';
 // ambiguous/non-existent local times while the customer app is not yet exposing
 // recurring schedules. Every occurrence is still stored as an absolute Timestamp.
 function recurringLocalDateTimeToDate(localDate: string, localTime: string): Date {
-  const dateMatch = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(localDate);
-  const timeMatch = /^(\\d{2}):(\\d{2})$/.exec(localTime);
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(localDate);
+  const timeMatch = /^(\d{2}):(\d{2})$/.exec(localTime);
   if (!dateMatch || !timeMatch) {
     throw new HttpsError('invalid-argument', 'Use YYYY-MM-DD dates and HH:mm local times.');
   }
@@ -224,7 +224,7 @@ export const createRecurringBookingSeries = onCall(async (request) => {
   if (typeof city !== 'string' || !cityConfig.has(city)) {
     throw new HttpsError('failed-precondition', 'This city is not in the initial launch area.');
   }
-  if (typeof pincode !== 'string' || !/^\\d{6}$/.test(pincode)) {
+  if (typeof pincode !== 'string' || !/^\d{6}$/.test(pincode)) {
     throw new HttpsError('invalid-argument', 'Enter a valid 6-digit service pincode.');
   }
   if (typeof address !== 'string' || !address.trim() || address.trim().length > 500) {
@@ -236,13 +236,17 @@ export const createRecurringBookingSeries = onCall(async (request) => {
   if (typeof startDate !== 'string' || typeof endDate !== 'string') {
     throw new HttpsError('invalid-argument', 'Choose a recurring start date and end date.');
   }
-  const startDateMatch = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(startDate);
-  const endDateMatch = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(endDate);
+  const startDateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(startDate);
+  const endDateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(endDate);
   if (!startDateMatch || !endDateMatch) {
     throw new HttpsError('invalid-argument', 'Use YYYY-MM-DD for recurring dates.');
   }
   const startDay = Date.UTC(Number(startDateMatch[1]), Number(startDateMatch[2]) - 1, Number(startDateMatch[3]));
   const endDay = Date.UTC(Number(endDateMatch[1]), Number(endDateMatch[2]) - 1, Number(endDateMatch[3]));
+  if (new Date(startDay).toISOString().slice(0, 10) !== startDate
+      || new Date(endDay).toISOString().slice(0, 10) !== endDate) {
+    throw new HttpsError('invalid-argument', 'A recurring start or end date is not a real calendar date.');
+  }
   const dayCount = Math.floor((endDay - startDay) / 86400000) + 1;
   if (dayCount < 1 || dayCount > MAX_RECURRING_DAYS) {
     throw new HttpsError('invalid-argument', 'A recurring request can cover at most 31 calendar days.');
@@ -264,7 +268,7 @@ export const createRecurringBookingSeries = onCall(async (request) => {
   }));
   if (normalizedSlots.some((slot: {id: string; localTime: string}) =>
       !/^[a-zA-Z0-9_-]{1,24}$/.test(slot.id)
-      || !/^([01]\\d|2[0-3]):[0-5]\\d$/.test(slot.localTime))
+      || !/^([01]\d|2[0-3]):[0-5]\d$/.test(slot.localTime))
       || new Set(normalizedSlots.map((slot: {id: string}) => slot.id)).size !== normalizedSlots.length) {
     throw new HttpsError('invalid-argument', 'Each time slot needs a unique ID and valid 24-hour local time.');
   }
@@ -363,6 +367,8 @@ export const createRecurringBookingSeries = onCall(async (request) => {
         seriesId,
         bookingIds: Array.isArray(existing.data()?.occurrenceBookingIds)
           ? existing.data()!.occurrenceBookingIds as string[] : [],
+        availableOccurrenceCount: existing.data()?.availableOccurrenceCount ?? 0,
+        unavailableOccurrenceCount: existing.data()?.unavailableOccurrenceCount ?? 0,
       };
     }
     const seriesData = {
@@ -421,7 +427,13 @@ export const createRecurringBookingSeries = onCall(async (request) => {
         createdAt: now,
       });
     });
-    return { created: true, seriesId, bookingIds: prepared.map((item) => item.bookingId) };
+    return {
+      created: true,
+      seriesId,
+      bookingIds: prepared.map((item) => item.bookingId),
+      availableOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length > 0).length,
+      unavailableOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length === 0).length,
+    };
   });
 
   return {
@@ -431,8 +443,8 @@ export const createRecurringBookingSeries = onCall(async (request) => {
     timezone: RECURRING_TIMEZONE,
     occurrenceCount: result.bookingIds.length,
     occurrenceBookingIds: result.bookingIds,
-    availableOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length > 0).length,
-    unavailableOccurrenceCount: prepared.filter((item) => item.eligibleWalkerIds.length === 0).length,
+    availableOccurrenceCount: result.availableOccurrenceCount,
+    unavailableOccurrenceCount: result.unavailableOccurrenceCount,
     paymentCollected: false,
     walkersReserved: false,
   };
