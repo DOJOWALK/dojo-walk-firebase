@@ -345,6 +345,12 @@ export const submitWalkerApplication = onCall(async (request) => {
   const data = request.data ?? {};
   const displayName = typeof data.displayName === 'string' ? data.displayName.trim() : '';
   const phone = typeof data.phone === 'string' ? data.phone.replace(/\D/g, '') : '';
+  const verifiedTokenPhone = typeof request.auth.token.phone_number === 'string'
+    ? request.auth.token.phone_number.replace(/\D/g, '').slice(-10)
+    : '';
+  if (verifiedTokenPhone && verifiedTokenPhone !== phone) {
+    throw new HttpsError('permission-denied', 'The application phone must match your verified sign-in number.');
+  }
   const city = typeof data.city === 'string' ? data.city : '';
   const pincode = typeof data.pincode === 'string' ? data.pincode.trim() : '';
   if (displayName.length < 2 || displayName.length > 80) {
