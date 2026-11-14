@@ -104,6 +104,37 @@ export const createBookingDraft = onCall(async (request) => {
     );
   }
 
+  // Keep continuity with the most recently confirmed/completed walk for the
+  // same customer, pet and pincode. A different walker is a substitution and
+  // is only considered when the owner explicitly opts in for this booking.
+  const allowBackupWalker = data.allowBackupWalker === true;
+  const recentBookings = await db.collection('bookings')
+    .where('customerId', '==', request.auth.uid)
+    .orderBy('createdAt', 'desc')
+    .limit(50)
+    .get();
+  const primaryBooking = recentBookings.docs.find((doc) => {
+    const previous = doc.data();
+    return previous.petName === petName.trim()
+      && previous.pincode === pincode
+      && ['confirmed', 'completed'].includes(previous.status)
+      && typeof previous.walkerId === 'string';
+  });
+  const primaryWalkerId = primaryBooking?.data().walkerId as string | undefined;
+  const primaryIsAvailable = !!primaryWalkerId && availableWalkerIds.includes(primaryWalkerId);
+  if (primaryWalkerId && !primaryIsAvailable && !allowBackupWalker) {
+    throw new HttpsError(
+      'failed-precondition',
+      'Your regular walker is not available at this time. Allow a backup walker or choose another time.',
+    );
+  }
+  const orderedWalkerIds = primaryWalkerId
+    ? [
+        ...(primaryIsAvailable ? [primaryWalkerId] : []),
+        ...(allowBackupWalker ? availableWalkerIds.filter((id) => id !== primaryWalkerId) : []),
+      ]
+    : availableWalkerIds;
+
   // This creates a draft only. It does not reserve a walker or collect payment.
   const now = Timestamp.now();
   const quoteExpiresAt = Timestamp.fromMillis(now.toMillis() + PRICE_QUOTE_MINUTES * 60 * 1000);
@@ -117,7 +148,10 @@ export const createBookingDraft = onCall(async (request) => {
     petName: petName.trim(),
     scheduledAt: Timestamp.fromDate(start),
     endsAt: Timestamp.fromDate(end),
-    eligibleWalkerIds: availableWalkerIds,
+    eligibleWalkerIds: orderedWalkerIds,
+    primaryWalkerId: primaryWalkerId ?? null,
+    allowBackupWalker,
+    backupConsentAt: allowBackupWalker ? now : null,
     // Immutable customer-price quote for this booking. Later admin price edits
     // apply only to new booking drafts, never silently to this quote.
     quotedAmountPaise: configuredAmountPaise,
