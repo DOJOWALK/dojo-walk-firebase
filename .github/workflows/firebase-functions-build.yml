@@ -1,4 +1,4 @@
-name: Firebase Functions Build
+name: Firebase Functions and Firestore Config Build
 
 on:
   push:
@@ -6,13 +6,19 @@ on:
     paths:
       - "functions/**"
       - "firebase.json"
+      - "firestore.rules"
+      - "firestore.indexes.json"
       - ".github/workflows/firebase-functions-build.yml"
+      - ".github/workflows/deploy-firestore-config.yml"
   pull_request:
     branches: [main]
     paths:
       - "functions/**"
       - "firebase.json"
+      - "firestore.rules"
+      - "firestore.indexes.json"
       - ".github/workflows/firebase-functions-build.yml"
+      - ".github/workflows/deploy-firestore-config.yml"
 
 jobs:
   build:
@@ -24,6 +30,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Validate Firebase and Firestore configuration
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('firebase.json', 'utf8'));"
+          node -e "JSON.parse(require('fs').readFileSync('firestore.indexes.json', 'utf8'));"
+          test -s firestore.rules
       - name: Install dependencies
         working-directory: functions
         run: npm install
