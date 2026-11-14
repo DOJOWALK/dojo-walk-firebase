@@ -469,6 +469,72 @@ export const createRecurringBookingSeries = onCall(async (request) => {
 const HOLD_MINUTES = 10;
 const PRICE_QUOTE_MINUTES = 30;
 
+// Recurring occurrences can be scheduled weeks ahead, so their initial series
+// quote is only indicative. Refresh one occurrence's admin-managed price when
+// the customer is ready to confirm it; this does not reserve a walker or charge.
+export const refreshRecurringOccurrenceQuote = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in before refreshing a walk quote.');
+  }
+  const bookingId = request.data?.bookingId;
+  if (typeof bookingId !== 'string' || !/^[a-f0-9]{40}$/.test(bookingId)) {
+    throw new HttpsError('invalid-argument', 'A valid recurring walk ID is required.');
+  }
+  const bookingRef = db.collection('bookings').doc(bookingId);
+  const bookingSnap = await bookingRef.get();
+  if (!bookingSnap.exists || bookingSnap.data()?.customerId !== request.auth.uid) {
+    throw new HttpsError('not-found', 'Recurring walk was not found.');
+  }
+  const booking = bookingSnap.data()!;
+  if (typeof booking.seriesId !== 'string'
+      || booking.status !== 'draft'
+      || booking.paymentStatus !== 'unpaid'
+      || booking.paymentOrderStatus === 'created'
+      || !(booking.scheduledAt instanceof Timestamp)
+      || booking.scheduledAt.toMillis() <= Date.now()) {
+    throw new HttpsError('failed-precondition',
+      'Only an unpaid future recurring walk draft can receive a fresh quote.');
+  }
+  const pricingSnap = await db.collection('bookingPricing')
+    .doc(String(booking.durationMinutes)).get();
+  const pricing = pricingSnap.data();
+  const amountPaise = pricing?.amountPaise;
+  if (pricing?.active !== true || !Number.isSafeInteger(amountPaise) || amountPaise <= 0) {
+    throw new HttpsError('failed-precondition',
+      'Current pricing is unavailable for this walk. Please contact DOJO WALK.');
+  }
+  const now = Timestamp.now();
+  const quoteExpiresAt = Timestamp.fromMillis(now.toMillis() + PRICE_QUOTE_MINUTES * 60000);
+  await db.runTransaction(async (tx) => {
+    const fresh = await tx.get(bookingRef);
+    if (!fresh.exists || fresh.data()?.customerId !== request.auth!.uid
+        || fresh.data()?.seriesId !== booking.seriesId
+        || fresh.data()?.status !== 'draft'
+        || fresh.data()?.paymentStatus !== 'unpaid'
+        || !(fresh.data()?.scheduledAt instanceof Timestamp)
+        || fresh.data()!.scheduledAt.toMillis() <= Date.now()) {
+      throw new HttpsError('failed-precondition',
+        'This recurring walk changed and can no longer be quoted.');
+    }
+    tx.update(bookingRef, {
+      quotedAmountPaise: amountPaise,
+      quotedCurrency: 'INR',
+      pricingVersion: pricing.version ?? null,
+      pricingUpdatedAt: pricing.updatedAt instanceof Timestamp ? pricing.updatedAt : null,
+      quotedAt: now,
+      quoteExpiresAt,
+      updatedAt: now,
+    });
+  });
+  return {
+    bookingId,
+    amountPaise,
+    currency: 'INR',
+    pricingVersion: pricing.version ?? null,
+    quoteExpiresAt: quoteExpiresAt.toDate().toISOString(),
+  };
+});
+
 export const reserveWalkerForBooking = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Sign in to reserve a walker.');
