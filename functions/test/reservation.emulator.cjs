@@ -19,7 +19,7 @@ test.after(async () => {
   await deleteApp(app);
 });
 
-async function seedScenario({ startOffsetMinutes = 120, existingReservation = null, coverageEnabled = true } = {}) {
+async function seedScenario({ startOffsetMinutes = 120, existingReservation = null, coverageEnabled = true, pausedSeries = false } = {}) {
   const id = 'reservation-test-' + (++sequence);
   const walkerId = 'walker-' + id;
   const customerId = 'customer-' + id;
@@ -48,8 +48,15 @@ async function seedScenario({ startOffsetMinutes = 120, existingReservation = nu
     startAt: Timestamp.fromMillis(startAt.toMillis() - 60 * 60000),
     endAt: Timestamp.fromMillis(endAt.toMillis() + 60 * 60000),
   });
+  const seriesId = pausedSeries ? 'series-' + id : null;
+  if (seriesId) {
+    await db.collection('bookingSeries').doc(seriesId).set({
+      customerId, status: 'paused', createdAt: Timestamp.now(),
+    });
+  }
   await bookingRef.set({
     customerId,
+    ...(seriesId ? { seriesId } : {}),
     status: 'draft',
     city: 'Ghaziabad',
     pincode: '201009',
@@ -144,4 +151,14 @@ test('a confirmed reservation with overlapping travel buffer blocks the new hold
   assert.equal(await reserve(s), false);
   const booking = (await s.bookingRef.get()).data();
   assert.equal(booking.status, 'draft');
+});
+
+test('a paused recurring series cannot acquire a new walker hold', async () => {
+  const s = await seedScenario({ pausedSeries: true });
+  await assert.rejects(reserve(s), (error) => error.code === 'failed-precondition');
+  const booking = (await s.bookingRef.get()).data();
+  assert.equal(booking.status, 'draft');
+  assert.equal(booking.walkerId, undefined);
+  const holds = await s.walkerRef.collection('reservations').where('status', '==', 'held').get();
+  assert.equal(holds.size, 0);
 });
