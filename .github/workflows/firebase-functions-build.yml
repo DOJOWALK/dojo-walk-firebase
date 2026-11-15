@@ -32,6 +32,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Set up Java for Firestore Emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
       - name: Validate Firebase and Firestore configuration
         run: |
           node -e "JSON.parse(require('fs').readFileSync('firebase.json', 'utf8'));"
@@ -40,6 +45,9 @@ jobs:
       - name: Install dependencies
         working-directory: functions
         run: npm install
-      - name: Compile TypeScript
+      - name: Build and payment signature unit tests
         working-directory: functions
         run: npm test
+      - name: Firestore security rules emulator tests
+        working-directory: functions
+        run: npm run test:rules
