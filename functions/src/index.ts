@@ -7,6 +7,11 @@ import { hmacHex, safeHexEqual } from './security';
 import { recurringLocalDateTimeToDate } from './schedule';
 import { finalizeCapturedRazorpayPayment, type RazorpayPayment } from './payment-finalizer';
 import { reserveWalkerTransaction } from './reservation';
+import {
+  createRecurringOccurrenceBookingId,
+  createRecurringRequestFingerprint,
+  createRecurringSeriesId,
+} from './recurring-identity';
 
 initializeApp();
 const db = getFirestore();
@@ -323,9 +328,9 @@ export const createRecurringBookingSeries = onCall(async (request) => {
         ]
       : available;
     const occurrenceKey = occurrence.localDate + '_' + occurrence.slotId;
-    const bookingId = createHash('sha256')
-      .update(request.auth!.uid + ':' + idempotencyKey + ':' + occurrenceKey)
-      .digest('hex').slice(0, 40);
+    const bookingId = createRecurringOccurrenceBookingId(
+      request.auth!.uid, idempotencyKey, occurrence.localDate, occurrence.slotId,
+    );
     return {
       ...occurrence,
       occurrenceKey,
@@ -338,14 +343,20 @@ export const createRecurringBookingSeries = onCall(async (request) => {
   // Stable series ID makes client retries idempotent. A transaction creates the
   // series and its <=30 occurrence drafts atomically; no walker is held and no
   // payment is collected by this callable.
-  const seriesId = createHash('sha256')
-    .update(request.auth.uid + ':' + idempotencyKey)
-    .digest('hex').slice(0, 40);
-  const requestFingerprint = createHash('sha256').update(JSON.stringify({
-    durationMinutes, address: address.trim(), petName: petName.trim(), city, pincode,
-    startDate, endDate, weekdays: [...selectedWeekdays].sort(), timeSlots: normalizedSlots,
-    allowBackupWalker, timezone: RECURRING_TIMEZONE,
-  })).digest('hex');
+  const seriesId = createRecurringSeriesId(request.auth.uid, idempotencyKey);
+  const requestFingerprint = createRecurringRequestFingerprint({
+    durationMinutes,
+    address: address.trim(),
+    petName: petName.trim(),
+    city,
+    pincode,
+    startDate,
+    endDate,
+    weekdays: [...selectedWeekdays],
+    timeSlots: normalizedSlots,
+    allowBackupWalker,
+    timezone: RECURRING_TIMEZONE,
+  });
   const seriesRef = db.collection('bookingSeries').doc(seriesId);
   const bookingRefs = prepared.map((item) => db.collection('bookings').doc(item.bookingId));
   const result = await db.runTransaction(async (tx) => {
