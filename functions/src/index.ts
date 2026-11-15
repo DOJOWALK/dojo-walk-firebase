@@ -1689,6 +1689,8 @@ export const createRazorpayOrder = onCall(
         ]);
         if (!freshBooking.exists || freshBooking.data()?.customerId !== request.auth!.uid
             || freshBooking.data()?.status !== 'walker_held'
+            || freshBooking.data()?.walkerId !== booking.walkerId
+            || freshBooking.data()?.reservationId !== booking.reservationId
             || ['created', 'creating', 'reconciliation_required']
               .includes(freshBooking.data()?.paymentOrderStatus)
             || typeof freshBooking.data()?.razorpayOrderId === 'string'
