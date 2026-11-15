@@ -12,7 +12,8 @@
     "test": "npm run build && node --test test/*.test.cjs",
     "test:rules": "firebase emulators:exec --only firestore --project demo-dojo-walk --config ../firebase.json \"node --test test/firestore-rules.emulator.cjs\"",
     "test:payment-emulator": "firebase emulators:exec --only firestore --project demo-dojo-walk --config ../firebase.json \"node --test test/payment-finalizer.emulator.cjs\"",
-    "test:reservation-emulator": "firebase emulators:exec --only firestore --project demo-dojo-walk --config ../firebase.json \"node --test test/reservation.emulator.cjs\""
+    "test:reservation-emulator": "firebase emulators:exec --only firestore --project demo-dojo-walk --config ../firebase.json \"node --test test/reservation.emulator.cjs\"",
+    "test:series-lifecycle-emulator": "firebase emulators:exec --only firestore --project demo-dojo-walk --config ../firebase.json \"node --test test/series-lifecycle.emulator.cjs\""
   },
   "dependencies": {
     "firebase-admin": "^14.5.1",
