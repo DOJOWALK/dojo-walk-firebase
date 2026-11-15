@@ -45,6 +45,31 @@ jobs:
       - name: Install dependencies
         working-directory: functions
         run: npm install
+      - name: Report dependency audit details
+        working-directory: functions
+        run: |
+          npm audit --json > npm-audit.json || true
+          node <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('npm-audit.json', 'utf8'));
+          const vulnerabilities = report.vulnerabilities || {};
+          const counts = report.metadata?.vulnerabilities || {};
+          const lines = [
+            '### Dependency audit',
+            '',
+            '| Severity | Count |',
+            '|---|---:|',
+            ...['critical', 'high', 'moderate', 'low', 'info'].map((level) =>
+              `| ${level} | ${counts[level] ?? 0} |`),
+            '',
+            '| Package | Severity | Direct | Fix available |',
+            '|---|---|---|---|',
+            ...Object.entries(vulnerabilities).map(([name, item]) =>
+              `| ${name} | ${item.severity} | ${item.isDirect ? 'yes' : 'no'} | ${item.fixAvailable ? JSON.stringify(item.fixAvailable) : 'no'} |`),
+            '',
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\\n'));
+          NODE
       - name: Build and payment signature unit tests
         working-directory: functions
         run: npm test
@@ -54,3 +79,6 @@ jobs:
       - name: Payment finalizer Firestore emulator tests
         working-directory: functions
         run: npm run test:payment-emulator
+      - name: Walker reservation concurrency Firestore emulator tests
+        working-directory: functions
+        run: npm run test:reservation-emulator
