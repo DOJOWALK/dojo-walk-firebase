@@ -5,8 +5,8 @@ import { HttpsError } from 'firebase-functions/v2/https';
  * India has no daylight-saving transitions, so the offset is always UTC+05:30.
  */
 export function recurringLocalDateTimeToDate(localDate: string, localTime: string): Date {
-  const dateMatch = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(localDate);
-  const timeMatch = /^(\\d{2}):(\\d{2})$/.exec(localTime);
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(localDate);
+  const timeMatch = /^(\d{2}):(\d{2})$/.exec(localTime);
   if (!dateMatch || !timeMatch) {
     throw new HttpsError('invalid-argument', 'Use YYYY-MM-DD dates and HH:mm local times.');
   }
