@@ -1047,7 +1047,7 @@ export const cancelCustomerBooking = onCall(async (request) => {
     const booking = bookingSnap.data()!;
     if (!['draft', 'walker_held'].includes(booking.status)
         || booking.paymentStatus !== 'unpaid'
-        || booking.paymentOrderStatus === 'created'
+        || ['creating', 'created', 'reconciliation_required'].includes(booking.paymentOrderStatus)
         || typeof booking.razorpayOrderId === 'string'
         || typeof booking.paymentId === 'string') {
       throw new HttpsError('failed-precondition',
