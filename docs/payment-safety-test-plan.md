@@ -56,4 +56,19 @@ This checklist is a release gate for the Razorpay + Firestore booking flow. It i
 - A tested admin reconciliation procedure for `reconciliation_required`, duplicate capture, and `payment_review`.
 - A verified rollback/backup procedure before production deployment.
 
-**Current status:** CI compiles TypeScript and validates Firebase/Firestore configuration. The scenarios above have not yet been run as automated integration tests or against Razorpay Test Mode. Do not treat this checklist as a completed payment certification.
+## Current automated coverage
+
+The CI suite now includes:
+
+- Unit tests for checkout HMAC and exact webhook raw-body HMAC validation.
+- Pure payment-decision tests for matching captures, mismatches, duplicate captures, and invalid/expired holds.
+- Firestore Emulator transaction tests against the production payment-finalizer function: valid hold confirmation, expired-hold payment review, same-payment idempotency, concurrent duplicate finalization, and payment-ID collision.
+- Firestore security-rules Emulator tests.
+
+Still not covered by these emulator tests:
+
+- End-to-end reservation candidate selection and concurrent walker-overlap contention.
+- Live Razorpay Test Mode checkout, webhook signature delivery, API timeouts, and reconciliation recovery.
+- Concurrent webhook event-document claim semantics.
+
+A passing CI run is evidence only for the automated cases above, not a completed payment certification. Do not deploy on the basis of this checklist alone.
