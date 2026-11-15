@@ -1046,9 +1046,12 @@ export const cancelCustomerBooking = onCall(async (request) => {
     }
     const booking = bookingSnap.data()!;
     if (!['draft', 'walker_held'].includes(booking.status)
-        || booking.paymentStatus !== 'unpaid') {
+        || booking.paymentStatus !== 'unpaid'
+        || booking.paymentOrderStatus === 'created'
+        || typeof booking.razorpayOrderId === 'string'
+        || typeof booking.paymentId === 'string') {
       throw new HttpsError('failed-precondition',
-        'Only unpaid bookings before payment confirmation can be cancelled in the app. Please contact support for paid bookings.');
+        'Only unpaid bookings with no payment order can be cancelled in the app. If payment was started, please contact support so the payment can be checked safely.');
     }
     let reservationRef: DocumentReference | null = null;
     let reservationSnap: DocumentSnapshot | null = null;
