@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { hmacHex, safeHexEqual } from './security';
 import { recurringLocalDateTimeToDate } from './schedule';
 import { finalizeCapturedRazorpayPayment, type RazorpayPayment } from './payment-finalizer';
+import { reserveWalkerTransaction } from './reservation';
 
 initializeApp();
 const db = getFirestore();
@@ -610,127 +611,17 @@ export const reserveWalkerForBooking = onCall(async (request) => {
     const holdExpiresAt = Timestamp.fromMillis(Date.now() + HOLD_MINUTES * 60 * 1000);
 
     try {
-      const result = await db.runTransaction(async (tx) => {
-        const [freshBooking, walkerSnap, coverageSnap] = await Promise.all([
-          tx.get(bookingRef),
-          tx.get(walkerRef),
-          tx.get(coverageRef),
-        ]);
-        if (!freshBooking.exists || freshBooking.data()?.customerId !== request.auth!.uid
-            || freshBooking.data()?.status !== 'draft') {
-          throw new HttpsError('failed-precondition', 'Booking is no longer available for reservation.');
-        }
-        // Use the transaction's fresh booking snapshot for every scheduling and
-        // eligibility decision. The earlier read is only for candidate discovery;
-        // it must never authorize a hold after the draft has been edited.
-        const freshData = freshBooking.data()!;
-        const freshEligibleIds = Array.isArray(freshData.eligibleWalkerIds)
-          ? freshData.eligibleWalkerIds : [];
-        if (!(freshData.scheduledAt instanceof Timestamp)
-            || !(freshData.endsAt instanceof Timestamp)
-            || freshData.scheduledAt.toMillis() <= Date.now()
-            || freshData.city !== booking.city
-            || freshData.pincode !== booking.pincode
-            || !freshEligibleIds.includes(walkerId)) {
-          throw new HttpsError('failed-precondition',
-            'Booking details or walker eligibility changed. Please check availability again.');
-        }
-        const coverage = coverageSnap.data();
-        const coveredWalkerIds = Array.isArray(coverage?.walkerIds)
-          ? coverage.walkerIds.filter((id: unknown): id is string => typeof id === 'string')
-          : [];
-        if (!coverageSnap.exists || coverage?.enabled !== true
-            || coverage.city !== booking.city || !coveredWalkerIds.includes(walkerId)
-            || !walkerSnap.exists || walkerSnap.data()?.active !== true
-            || !Array.isArray(walkerSnap.data()?.serviceablePincodes)
-            || !walkerSnap.data()!.serviceablePincodes.includes(booking.pincode)) {
-          return false;
-        }
-
-        const startAt = freshData.scheduledAt as Timestamp;
-        const endAt = freshData.endsAt as Timestamp;
-        // Travel/rest buffer is configured per walker by operations. Older walker
-        // records safely fall back to 15 minutes until an admin sets a value.
-        const configuredBuffer = walkerSnap.data()?.travelBufferMinutes;
-        const bufferMinutes = Number.isInteger(configuredBuffer)
-          && configuredBuffer >= 0 && configuredBuffer <= 120
-          ? configuredBuffer : 15;
-        const bufferMillis = bufferMinutes * 60 * 1000;
-        const bufferedStartAt = Timestamp.fromMillis(startAt.toMillis() - bufferMillis);
-        const bufferedEndAt = Timestamp.fromMillis(endAt.toMillis() + bufferMillis);
-        const windowsQuery = walkerRef.collection('availabilityWindows')
-          .where('status', '==', 'available')
-          .where('startAt', '<=', startAt)
-          .where('endAt', '>=', endAt)
-          .limit(1);
-        // Query a wider envelope than this booking's own buffer. Existing
-        // reservations persist the buffer that was in force when they were
-        // created, so a later admin change (for example 120 -> 15 minutes)
-        // must not hide an older reservation whose stored buffer still overlaps.
-        // Every stored buffer is validated/capped at 120 minutes below.
-        const maxStoredBufferMillis = 120 * 60 * 1000;
-        const overlapQueryStart = Timestamp.fromMillis(
-          bufferedStartAt.toMillis() - maxStoredBufferMillis,
-        );
-        const overlapQueryEnd = Timestamp.fromMillis(
-          bufferedEndAt.toMillis() + maxStoredBufferMillis,
-        );
-        const overlapsQuery = walkerRef.collection('reservations')
-          .where('startAt', '<', overlapQueryEnd)
-          .where('endAt', '>', overlapQueryStart);
-        const [windows, overlaps] = await Promise.all([
-          tx.get(windowsQuery),
-          tx.get(overlapsQuery),
-        ]);
-        if (windows.empty) return false;
-
-        const now = Timestamp.now();
-        const hasConflict = overlaps.docs.some((doc) => {
-          const data = doc.data();
-          const active = data.status === 'confirmed'
-            || (data.status === 'held'
-              && data.expiresAt instanceof Timestamp
-              && data.expiresAt.toMillis() > now.toMillis());
-          if (!active || !(data.startAt instanceof Timestamp)
-              || !(data.endAt instanceof Timestamp)) return false;
-          const existingBefore = Number.isInteger(data.bufferBeforeMinutes)
-            && data.bufferBeforeMinutes >= 0 && data.bufferBeforeMinutes <= 120
-            ? data.bufferBeforeMinutes : 15;
-          const existingAfter = Number.isInteger(data.bufferAfterMinutes)
-            && data.bufferAfterMinutes >= 0 && data.bufferAfterMinutes <= 120
-            ? data.bufferAfterMinutes : 15;
-          const existingBufferedStart = data.startAt.toMillis() - existingBefore * 60 * 1000;
-          const existingBufferedEnd = data.endAt.toMillis() + existingAfter * 60 * 1000;
-          return existingBufferedStart < bufferedEndAt.toMillis()
-            && existingBufferedEnd > bufferedStartAt.toMillis();
-        });
-        if (hasConflict) return false;
-
-        // Updating the walker document makes concurrent reservations contend on one
-        // shared document, preventing two overlapping holds from both committing.
-        tx.update(walkerRef, {
-          reservationVersion: (walkerSnap.data()?.reservationVersion ?? 0) + 1,
-          updatedAt: now,
-        });
-        tx.create(reservationRef, {
-          bookingId,
-          customerId: request.auth!.uid,
-          startAt,
-          endAt,
-          bufferBeforeMinutes: bufferMinutes,
-          bufferAfterMinutes: bufferMinutes,
-          status: 'held',
-          expiresAt: holdExpiresAt,
-          createdAt: now,
-        });
-        tx.update(bookingRef, {
-          walkerId,
-          reservationId: reservationRef.id,
-          reservationExpiresAt: holdExpiresAt,
-          status: 'walker_held',
-          updatedAt: now,
-        });
-        return true;
+      const result = await reserveWalkerTransaction(db, {
+        bookingRef,
+        walkerRef,
+        coverageRef,
+        reservationRef,
+        bookingId,
+        customerId: request.auth!.uid,
+        walkerId,
+        expectedCity: booking.city,
+        expectedPincode: booking.pincode,
+        holdExpiresAt,
       });
 
       if (result) {
