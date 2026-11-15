@@ -118,6 +118,7 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, output);
           NODE
       - name: Enforce production dependency security threshold
+        working-directory: functions
         run: npm audit --omit=dev --audit-level=high
 
       - name: Build and payment signature unit tests
