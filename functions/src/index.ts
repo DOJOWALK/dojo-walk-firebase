@@ -5,6 +5,7 @@ import { defineSecret } from 'firebase-functions/params';
 import { createHash } from 'node:crypto';
 import { hmacHex, safeHexEqual } from './security';
 import { recurringLocalDateTimeToDate } from './schedule';
+import { decideCapturedPayment } from './payment-decision';
 
 initializeApp();
 const db = getFirestore();
@@ -1481,16 +1482,27 @@ async function finalizeCapturedRazorpayPayment(
       }
       return { status: booking.status, bookingId };
     }
-    if (booking.razorpayOrderId !== payment.order_id
-        || booking.razorpayAmountPaise !== payment.amount
-        || booking.razorpayCurrency !== payment.currency
-        || payment.status !== 'captured'
-        || payment.captured !== true) {
+    const decision = decideCapturedPayment({
+      bookingOrderId: booking.razorpayOrderId,
+      bookingAmountPaise: booking.razorpayAmountPaise,
+      bookingCurrency: booking.razorpayCurrency,
+      paymentOrderId: payment.order_id,
+      paymentAmountPaise: payment.amount,
+      paymentCurrency: payment.currency,
+      paymentStatus: payment.status,
+      paymentCaptured: payment.captured,
+      bookingPaymentStatus: booking.paymentStatus,
+      bookingStatus: booking.status,
+      reservationStatus: undefined,
+      reservationExpiresAtMillis: undefined,
+      nowMillis: Date.now(),
+    });
+    if (decision === 'reject') {
       throw new Error('Captured payment does not match the server-side order.');
     }
 
     const now = Timestamp.now();
-    if (booking.paymentStatus === 'paid' || booking.status === 'confirmed') {
+    if (decision === 'duplicate_review') {
       tx.create(paymentRef, {
         bookingId,
         razorpayOrderId: payment.order_id,
@@ -1517,12 +1529,21 @@ async function finalizeCapturedRazorpayPayment(
       : null;
     const reservationSnap = reservationRef ? await tx.get(reservationRef) : null;
     const reservation = reservationSnap?.data();
-    const reservationIsValid = booking.status === 'walker_held'
-      && reservationRef !== null
-      && reservationSnap?.exists === true
-      && reservation?.status === 'held'
-      && reservation.expiresAt instanceof Timestamp
-      && reservation.expiresAt.toMillis() > now.toMillis();
+    const reservationIsValid = decideCapturedPayment({
+      bookingOrderId: booking.razorpayOrderId,
+      bookingAmountPaise: booking.razorpayAmountPaise,
+      bookingCurrency: booking.razorpayCurrency,
+      paymentOrderId: payment.order_id,
+      paymentAmountPaise: payment.amount,
+      paymentCurrency: payment.currency,
+      paymentStatus: payment.status,
+      paymentCaptured: payment.captured,
+      bookingPaymentStatus: booking.paymentStatus,
+      bookingStatus: booking.status,
+      reservationStatus: reservationSnap?.exists ? reservation?.status : undefined,
+      reservationExpiresAtMillis: reservation?.expiresAt instanceof Timestamp ? reservation.expiresAt.toMillis() : undefined,
+      nowMillis: now.toMillis(),
+    }) === 'confirm';
 
     tx.create(paymentRef, {
       bookingId,
