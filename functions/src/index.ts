@@ -2,7 +2,8 @@ import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, Timestamp, DocumentReference, DocumentSnapshot } from 'firebase-admin/firestore';
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
-import { createHmac, createHash, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { hmacHex, safeHexEqual } from './security';
 
 initializeApp();
 const db = getFirestore();
@@ -1440,17 +1441,6 @@ type RazorpayOrder = {
   currency: string;
   status: string;
 };
-
-function safeHexEqual(expected: string, received: string): boolean {
-  if (!/^[a-f0-9]{64}$/i.test(received)) return false;
-  const left = Buffer.from(expected, 'hex');
-  const right = Buffer.from(received, 'hex');
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
-function hmacHex(secret: string, message: string): string {
-  return createHmac('sha256', secret).update(message).digest('hex');
-}
 
 async function razorpayApi<T>(
   path: string,
