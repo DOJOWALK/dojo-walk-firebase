@@ -1689,8 +1689,14 @@ export const createRazorpayOrder = onCall(
         ]);
         if (!freshBooking.exists || freshBooking.data()?.customerId !== request.auth!.uid
             || freshBooking.data()?.status !== 'walker_held'
-            || freshBooking.data()?.paymentOrderStatus === 'created'
-            || freshBooking.data()?.paymentOrderStatus === 'creating'
+            || ['created', 'creating', 'reconciliation_required']
+              .includes(freshBooking.data()?.paymentOrderStatus)
+            || typeof freshBooking.data()?.razorpayOrderId === 'string'
+            || typeof freshBooking.data()?.paymentId === 'string'
+            || freshBooking.data()?.quotedAmountPaise !== amountPaise
+            || freshBooking.data()?.quotedCurrency !== currency
+            || !(freshBooking.data()?.quoteExpiresAt instanceof Timestamp)
+            || freshBooking.data()!.quoteExpiresAt.toMillis() <= Date.now()
             || !reservationSnap.exists
             || reservationSnap.data()?.status !== 'held'
             || !(reservationSnap.data()?.expiresAt instanceof Timestamp)
