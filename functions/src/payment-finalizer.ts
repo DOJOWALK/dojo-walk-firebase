@@ -115,6 +115,13 @@ export async function finalizeCapturedRazorpayPayment(
       return { status: 'confirmed', bookingId };
     }
 
+    if (reservationRef && reservationSnap?.exists === true
+        && reservation?.status === 'held'
+        && reservation?.expiresAt instanceof Timestamp
+        && reservation.expiresAt.toMillis() <= now.toMillis()) {
+      tx.update(reservationRef, { status: 'expired', expiredAt: now });
+    }
+
     tx.update(bookingRef, {
       status: 'payment_review',
       paymentStatus: 'paid',
