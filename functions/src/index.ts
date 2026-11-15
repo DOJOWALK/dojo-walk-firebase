@@ -7,6 +7,7 @@ import { hmacHex, safeHexEqual } from './security';
 import { recurringLocalDateTimeToDate } from './schedule';
 import { finalizeCapturedRazorpayPayment, type RazorpayPayment } from './payment-finalizer';
 import { reserveWalkerTransaction } from './reservation';
+import { setCustomerBookingSeriesStatus } from './series-lifecycle';
 import {
   createRecurringOccurrenceBookingId,
   createRecurringRequestFingerprint,
@@ -497,8 +498,16 @@ export const refreshRecurringOccurrenceQuote = onCall(async (request) => {
   }
   const now = Timestamp.now();
   const quoteExpiresAt = Timestamp.fromMillis(now.toMillis() + PRICE_QUOTE_MINUTES * 60000);
+  const recurringSeriesRef = typeof booking.seriesId === 'string'
+    ? db.collection('bookingSeries').doc(booking.seriesId) : null;
   await db.runTransaction(async (tx) => {
-    const fresh = await tx.get(bookingRef);
+    const [fresh, seriesSnap] = await Promise.all([
+      tx.get(bookingRef),
+      recurringSeriesRef ? tx.get(recurringSeriesRef) : Promise.resolve(null),
+    ]);
+    if (recurringSeriesRef && (!seriesSnap?.exists || seriesSnap.data()?.status === 'paused')) {
+      throw new HttpsError('failed-precondition', 'This recurring schedule is paused. Resume it before refreshing a walk quote.');
+    }
     if (!fresh.exists || fresh.data()?.customerId !== request.auth!.uid
         || fresh.data()?.seriesId !== booking.seriesId
         || fresh.data()?.status !== 'draft'
@@ -1085,6 +1094,38 @@ export const listAdminBookings = onCall(async (request) => {
 });
 
 
+export const pauseCustomerBookingSeries = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in to pause your recurring schedule.');
+  }
+  const seriesId = request.data?.seriesId;
+  if (typeof seriesId !== 'string' || !/^[a-f0-9]{40}$/.test(seriesId)) {
+    throw new HttpsError('invalid-argument', 'A valid recurring schedule ID is required.');
+  }
+  const changed = await setCustomerBookingSeriesStatus(db, {
+    seriesRef: db.collection('bookingSeries').doc(seriesId),
+    customerId: request.auth.uid,
+    action: 'pause',
+  });
+  return { seriesId, status: 'paused', changed };
+});
+
+export const resumeCustomerBookingSeries = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in to resume your recurring schedule.');
+  }
+  const seriesId = request.data?.seriesId;
+  if (typeof seriesId !== 'string' || !/^[a-f0-9]{40}$/.test(seriesId)) {
+    throw new HttpsError('invalid-argument', 'A valid recurring schedule ID is required.');
+  }
+  const changed = await setCustomerBookingSeriesStatus(db, {
+    seriesRef: db.collection('bookingSeries').doc(seriesId),
+    customerId: request.auth.uid,
+    action: 'resume',
+  });
+  return { seriesId, status: 'active', changed };
+});
+
 export const getCustomerBookingSeries = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Sign in to view your recurring schedules.');
@@ -1435,12 +1476,18 @@ export const createRazorpayOrder = onCall(
       .collection('reservations').doc(booking.reservationId);
     const paymentExpiresAt = Timestamp.fromMillis(Date.now() + PAYMENT_WINDOW_MINUTES * 60 * 1000);
 
+    const recurringSeriesRef = typeof booking.seriesId === 'string'
+      ? db.collection('bookingSeries').doc(booking.seriesId) : null;
     try {
       await db.runTransaction(async (tx) => {
-        const [freshBooking, reservationSnap] = await Promise.all([
+        const [freshBooking, reservationSnap, seriesSnap] = await Promise.all([
           tx.get(bookingRef),
           tx.get(reservationRef),
+          recurringSeriesRef ? tx.get(recurringSeriesRef) : Promise.resolve(null),
         ]);
+        if (recurringSeriesRef && (!seriesSnap?.exists || seriesSnap.data()?.status === 'paused')) {
+          throw new HttpsError('failed-precondition', 'This recurring schedule is paused. Resume it before starting a new payment.');
+        }
         if (!freshBooking.exists || freshBooking.data()?.customerId !== request.auth!.uid
             || freshBooking.data()?.status !== 'walker_held'
             || freshBooking.data()?.walkerId !== booking.walkerId
