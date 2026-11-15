@@ -90,3 +90,7 @@ The customer-owned series history query is backed by a Firestore composite index
 - Concurrent requests cannot create overlapping holds for the same walker.
 - Payment success, late capture, duplicate capture, cancellation, and refund are reconciled per occurrence or via a separately tested invoice ledger.
 - Firestore rules deny client writes to series, bookings, invoices, reservations, and audit records.
+
+## Customer pause and resume behavior
+
+Customers can pause or resume a recurring series without rewriting its occurrence bookings. Pausing changes only the series status; it does not cancel individual walks, release an existing walker hold, reverse a payment, or alter a confirmed/paid occurrence. While paused, the backend blocks fresh occurrence quote refreshes, new walker reservations, and creation of a new Razorpay order. A payment order already created before the pause remains eligible for normal Razorpay reconciliation; the pause is not a payment reversal. Resuming changes the series status to active and makes eligible unpaid future draft occurrences available for the normal per-occurrence flow again. Individual occurrence cancellation remains separate and continues to reject any booking with a created/in-flight/uncertain payment order or payment identifier.
