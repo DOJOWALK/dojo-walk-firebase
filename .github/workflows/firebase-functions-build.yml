@@ -148,3 +148,6 @@ jobs:
       - name: Walker reservation concurrency Firestore emulator tests
         working-directory: functions
         run: npm run test:reservation-emulator
+      - name: Recurring series lifecycle Firestore emulator tests
+        working-directory: functions
+        run: npm run test:series-lifecycle-emulator
