@@ -665,10 +665,21 @@ export const reserveWalkerForBooking = onCall(async (request) => {
           .where('startAt', '<=', startAt)
           .where('endAt', '>=', endAt)
           .limit(1);
-        // Include later-starting reservations within the post-walk buffer too.
+        // Query a wider envelope than this booking's own buffer. Existing
+        // reservations persist the buffer that was in force when they were
+        // created, so a later admin change (for example 120 -> 15 minutes)
+        // must not hide an older reservation whose stored buffer still overlaps.
+        // Every stored buffer is validated/capped at 120 minutes below.
+        const maxStoredBufferMillis = 120 * 60 * 1000;
+        const overlapQueryStart = Timestamp.fromMillis(
+          bufferedStartAt.toMillis() - maxStoredBufferMillis,
+        );
+        const overlapQueryEnd = Timestamp.fromMillis(
+          bufferedEndAt.toMillis() + maxStoredBufferMillis,
+        );
         const overlapsQuery = walkerRef.collection('reservations')
-          .where('startAt', '<', bufferedEndAt)
-          .where('endAt', '>', bufferedStartAt);
+          .where('startAt', '<', overlapQueryEnd)
+          .where('endAt', '>', overlapQueryStart);
         const [windows, overlaps] = await Promise.all([
           tx.get(windowsQuery),
           tx.get(overlapsQuery),
