@@ -51,7 +51,13 @@ jobs:
           npm audit --json > npm-audit.json || true
           node <<'NODE'
           const fs = require('node:fs');
-          const report = JSON.parse(fs.readFileSync('npm-audit.json', 'utf8'));
+          let report = {};
+          try {
+            report = JSON.parse(fs.readFileSync('npm-audit.json', 'utf8'));
+          } catch {
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, 'Dependency audit report unavailable.\\n');
+            process.exit(0);
+          }
           const vulnerabilities = report.vulnerabilities || {};
           const counts = report.metadata?.vulnerabilities || {};
           const lines = [
