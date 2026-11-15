@@ -125,6 +125,9 @@ jobs:
           console.log(output);
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, output);
           NODE
+      - name: Enforce full dependency security threshold
+        working-directory: functions
+        run: npm audit --audit-level=high
       - name: Enforce production dependency security threshold
         working-directory: functions
         run: npm audit --omit=dev --audit-level=moderate
