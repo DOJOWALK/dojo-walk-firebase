@@ -81,7 +81,7 @@ test('capture after reservation expiry records payment review, never confirms th
   const reservation = (await reservationRef.get()).data();
   assert.equal(booking.status, 'payment_review');
   assert.equal(booking.paymentReviewRequired, true);
-  assert.equal(reservation.status, 'held');
+  assert.equal(reservation.status, 'expired');
 });
 
 test('repeated finalization of the same payment is idempotent', async () => {
