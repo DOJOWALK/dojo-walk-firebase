@@ -1,6 +1,16 @@
 import { Firestore, Timestamp } from 'firebase-admin/firestore';
 import { decideCapturedPayment } from './payment-decision';
 
+export type RazorpayPayment = {
+  id: string;
+  order_id: string;
+  amount: number;
+  currency: string;
+  status: string;
+  captured?: boolean;
+  created_at?: number;
+};
+
 export async function finalizeCapturedRazorpayPayment(
   db: Firestore,
   bookingId: string,
