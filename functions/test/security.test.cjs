@@ -4,7 +4,7 @@ const { hmacHex, safeHexEqual } = require('../lib/security.js');
 
 test('checkout signature uses the order_id|payment_id HMAC message', () => {
   const signature = hmacHex('test-secret', 'order_123|pay_456');
-  assert.equal(signature, '5e50a0b7b7f6a2d6f9b4d0c40c1e52f9a5d8ec2d49e2c1a4e8ec8b4a88d0a4bb');
+  assert.equal(signature, '3d11ef56573a9e31769e78a41f41a18d4af118e57d57888eef2f0dda4a479357');
   assert.equal(safeHexEqual(signature, hmacHex('test-secret', 'order_123|pay_456')), true);
   assert.equal(safeHexEqual(signature, hmacHex('test-secret', 'order_123|pay_457')), false);
 });
