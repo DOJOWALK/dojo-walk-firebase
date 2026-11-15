@@ -5,7 +5,7 @@ import { defineSecret } from 'firebase-functions/params';
 import { createHash } from 'node:crypto';
 import { hmacHex, safeHexEqual } from './security';
 import { recurringLocalDateTimeToDate } from './schedule';
-import { finalizeCapturedRazorpayPayment } from './payment-finalizer';
+import { finalizeCapturedRazorpayPayment, type RazorpayPayment } from './payment-finalizer';
 
 initializeApp();
 const db = getFirestore();
@@ -1401,16 +1401,6 @@ const RAZORPAY_KEY_ID = defineSecret('RAZORPAY_KEY_ID');
 const RAZORPAY_KEY_SECRET = defineSecret('RAZORPAY_KEY_SECRET');
 const RAZORPAY_WEBHOOK_SECRET = defineSecret('RAZORPAY_WEBHOOK_SECRET');
 const PAYMENT_WINDOW_MINUTES = 15;
-
-type RazorpayPayment = {
-  id: string;
-  order_id: string;
-  amount: number;
-  currency: string;
-  status: string;
-  captured?: boolean;
-  created_at?: number;
-};
 
 type RazorpayOrder = {
   id: string;
