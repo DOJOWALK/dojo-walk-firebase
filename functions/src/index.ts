@@ -489,7 +489,9 @@ export const refreshRecurringOccurrenceQuote = onCall(async (request) => {
   if (typeof booking.seriesId !== 'string'
       || booking.status !== 'draft'
       || booking.paymentStatus !== 'unpaid'
-      || booking.paymentOrderStatus === 'created'
+      || ['creating', 'created', 'reconciliation_required'].includes(booking.paymentOrderStatus)
+      || typeof booking.razorpayOrderId === 'string'
+      || typeof booking.paymentId === 'string'
       || !(booking.scheduledAt instanceof Timestamp)
       || booking.scheduledAt.toMillis() <= Date.now()) {
     throw new HttpsError('failed-precondition',
@@ -511,6 +513,9 @@ export const refreshRecurringOccurrenceQuote = onCall(async (request) => {
         || fresh.data()?.seriesId !== booking.seriesId
         || fresh.data()?.status !== 'draft'
         || fresh.data()?.paymentStatus !== 'unpaid'
+        || ['creating', 'created', 'reconciliation_required'].includes(fresh.data()?.paymentOrderStatus)
+        || typeof fresh.data()?.razorpayOrderId === 'string'
+        || typeof fresh.data()?.paymentId === 'string'
         || !(fresh.data()?.scheduledAt instanceof Timestamp)
         || fresh.data()!.scheduledAt.toMillis() <= Date.now()) {
       throw new HttpsError('failed-precondition',
@@ -571,6 +576,12 @@ export const reserveWalkerForBooking = onCall(async (request) => {
       if (current.status !== 'walker_held'
           || !(current.reservationExpiresAt instanceof Timestamp)
           || current.reservationExpiresAt.toMillis() > Date.now()) return;
+      if (['creating', 'created', 'reconciliation_required'].includes(current.paymentOrderStatus)
+          || typeof current.razorpayOrderId === 'string'
+          || typeof current.paymentId === 'string') {
+        throw new HttpsError('failed-precondition',
+          'This booking has a payment order that must be reconciled before another walker can be reserved. Please contact support.');
+      }
       const oldReservationRef = db.collection('walkers').doc(current.walkerId)
         .collection('reservations').doc(current.reservationId);
       const oldReservation = await tx.get(oldReservationRef);
