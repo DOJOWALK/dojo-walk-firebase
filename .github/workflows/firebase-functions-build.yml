@@ -12,7 +12,7 @@ on:
       - ".github/workflows/deploy-firestore-config.yml"
       - ".github/workflows/deploy-walker-functions.yml"
   pull_request:
-    branches: [main]
+    branches: [main, feat/orange-primary-blue-secondary]
     paths:
       - "functions/**"
       - "firebase.json"
