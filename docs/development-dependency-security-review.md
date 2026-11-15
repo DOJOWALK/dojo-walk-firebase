@@ -24,6 +24,13 @@
 
 The full audit also reports transitive package entries for `archiver`, `archiver-utils`, `exegesis`, `gaxios`, `google-gax`, `rimraf`, and `zip-stream`. These are part of the same development-tool dependency graph; the production-only audit does not report them as vulnerable production dependencies.
 
+## Latest upstream compatibility check
+
+- On 2026-11-15, npm lists `firebase-tools@15.36.0` as the `latest` tag; the Firebase CLI release history also identifies v15.36.0 as the newest release. The repository already pins this version through `^15.36.0` and its lockfile.
+- The current CLI dependency graph includes `@google-cloud/pubsub@5.3.1`, `archiver@7.0.1`, `exegesis@4.3.0`, `gaxios@6.7.1`, and `glob@10.5.0`. The audited vulnerable ranges are pulled in by those declared dependencies.
+- The npm audit's suggested automatic fix is a downgrade to `firebase-tools@13.11.2` and is marked SemVer-major. It is not an acceptable automatic security update: it would roll back two major CLI generations and could regress emulator/CI behavior.
+- No newer stable Firebase CLI release was available in this review to test as a remediation. Therefore no dependency version or override was changed. Re-evaluate when Firebase CLI updates its dependency ranges or publishes a newer stable release.
+
 ## Remediation decision
 
 No blanket `npm audit fix --force` and no major-version overrides were applied. The audit's suggested Firebase CLI fix target (`13.11.2`) is a downgrade from the currently locked `15.36.0`; it is not accepted as a safe remediation without a compatibility review.
