@@ -49,6 +49,7 @@ jobs:
         working-directory: functions
         run: |
           npm audit --json > npm-audit.json || true
+          npm audit --omit=dev --json > npm-audit-production.json || true
           node <<'NODE'
           const fs = require('node:fs');
           let report = {};
@@ -84,6 +85,31 @@ jobs:
               const url = advisory.url ? ` (${advisory.url})` : '';
               const range = String(advisory.range || '—').replaceAll('|', '/');
               lines.push(`| ${name} | ${item.severity} | ${item.isDirect ? 'yes' : 'no'} | ${title}${url} | ${range} | ${item.fixAvailable ? JSON.stringify(item.fixAvailable) : 'no'} |`);
+            }
+          }
+          lines.push('', '### Production dependency audit (devDependencies omitted)', '');
+          let productionReport = {};
+          try {
+            productionReport = JSON.parse(fs.readFileSync('npm-audit-production.json', 'utf8'));
+          } catch {
+            lines.push('Production audit report unavailable.');
+          }
+          const productionCounts = productionReport.metadata?.vulnerabilities || {};
+          lines.push('| Severity | Count |', '|---|---:|',
+            ...['critical', 'high', 'moderate', 'low', 'info'].map((level) =>
+              `| ${level} | ${productionCounts[level] ?? 0} |`),
+            '', '| Package | Severity | Advisory | Vulnerable range |', '|---|---|---|---|');
+          for (const [name, item] of Object.entries(productionReport.vulnerabilities || {})) {
+            const advisories = (item.via || []).filter((entry) => entry && typeof entry === 'object');
+            if (advisories.length === 0) {
+              lines.push(`| ${name} | ${item.severity} | transitive dependency | — |`);
+            } else {
+              for (const advisory of advisories) {
+                const title = String(advisory.title || advisory.name || 'Advisory').replaceAll('|', '/');
+                const url = advisory.url ? ` (${advisory.url})` : '';
+                const range = String(advisory.range || '—').replaceAll('|', '/');
+                lines.push(`| ${name} | ${item.severity} | ${title}${url} | ${range} |`);
+              }
             }
           }
           lines.push('');
