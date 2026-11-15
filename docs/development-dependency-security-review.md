@@ -3,14 +3,15 @@
 **Reviewed:** 2026-11-15  
 **Repository:** `DOJOWALK/dojo-walk-firebase`  
 **Branch:** `feat/orange-primary-blue-secondary`  
-**Evidence:** GitHub Actions run [#130](https://github.com/DOJOWALK/dojo-walk-firebase/actions/runs/43712217219), commit `02d7fe3ffa97f21654c53aa6a24034890ea67bba`.
+**Evidence:** Initial audit run [#130](https://github.com/DOJOWALK/dojo-walk-firebase/actions/runs/43712217219); latest verified CI run [#135](https://github.com/DOJOWALK/dojo-walk-firebase/actions/runs/43716452908), commit `4dc451d8c94eb74f4cdcde3ecb796f347ecf16ab`.
 
 ## Current audit position
 
 - Production dependency audit (`npm audit --omit=dev`): 0 critical, 0 high, 0 moderate, 0 low, 0 info.
 - Full dependency tree: 13 moderate-severity affected package entries; no high or critical findings.
 - The affected packages reported by the full audit are in the development/test toolchain. The production-only audit is clean.
-- The CI run passed all 35 tests across build/unit, Firestore rules, payment finalizer, walker reservation, and recurring-series lifecycle suites.
+- Latest CI run #135 passed all 35 tests: build/unit 17, Firestore rules 5, payment finalizer 5, walker reservation 4, recurring-series lifecycle 4.
+- CI now enforces `npm audit --audit-level=high` across the full dependency tree and `npm audit --omit=dev --audit-level=moderate` for production dependencies. Both gates passed in run #135.
 
 ## Advisory review and dependency constraints
 
@@ -28,7 +29,7 @@ The full audit also reports transitive package entries for `archiver`, `archiver
 No blanket `npm audit fix --force` and no major-version overrides were applied. The audit's suggested Firebase CLI fix target (`13.11.2`) is a downgrade from the currently locked `15.36.0`; it is not accepted as a safe remediation without a compatibility review.
 
 The safe next step is to update the owning development-tool packages when they publish compatible dependency ranges, then regenerate the lockfile with `npm ci` validation and run every Emulator suite. Until then:
-- Keep the production audit as a CI gate.
+- Keep both the full-tree High/Critical audit gate and the production Moderate+ audit gate in CI.
 - Keep the full development dependency audit visible in CI logs and job summary.
 - Recheck the advisories on the next scheduled dependency review.
 - Do not treat this development-tool finding set as proof of a production runtime vulnerability.
