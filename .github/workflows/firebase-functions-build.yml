@@ -51,3 +51,6 @@ jobs:
       - name: Firestore security rules emulator tests
         working-directory: functions
         run: npm run test:rules
+      - name: Payment finalizer Firestore emulator tests
+        working-directory: functions
+        run: npm run test:payment-emulator
