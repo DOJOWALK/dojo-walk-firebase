@@ -8,6 +8,7 @@ import { recurringLocalDateTimeToDate } from './schedule';
 import { finalizeCapturedRazorpayPayment, type RazorpayPayment } from './payment-finalizer';
 import { reserveWalkerTransaction } from './reservation';
 import { setCustomerBookingSeriesStatus } from './series-lifecycle';
+import { resolveWalkerBookingTransition } from './walker-lifecycle';
 import {
   createRecurringOccurrenceBookingId,
   createRecurringRequestFingerprint,
@@ -854,23 +855,27 @@ export const updateWalkerBookingStatus = onCall(async (request) => {
     if (!(booking.scheduledAt instanceof Timestamp) || !(booking.endsAt instanceof Timestamp)) {
       throw new HttpsError('failed-precondition', 'This booking has invalid schedule details.');
     }
-    if (action === 'start') {
-      if (booking.status !== 'confirmed') {
-        throw new HttpsError('failed-precondition', 'Only confirmed walks can be started.');
-      }
-      const earliest = booking.scheduledAt.toMillis() - 30 * 60 * 1000;
-      const latest = booking.endsAt.toMillis() + 2 * 60 * 60 * 1000;
-      if (now.toMillis() < earliest || now.toMillis() > latest) {
-        throw new HttpsError('failed-precondition', 'You can start this walk from 30 minutes before its scheduled time until 2 hours after its planned end.');
-      }
+    const transition = resolveWalkerBookingTransition({
+      action,
+      bookingStatus: booking.status,
+      scheduledAtMillis: booking.scheduledAt.toMillis(),
+      endsAtMillis: booking.endsAt.toMillis(),
+      startedAtMillis: booking.startedAt instanceof Timestamp ? booking.startedAt.toMillis() : null,
+      nowMillis: now.toMillis(),
+    });
+    if (!transition.ok) {
+      const messages = {
+        not_confirmed: 'Only confirmed walks can be started.',
+        outside_start_window: 'You can start this walk from 30 minutes before its scheduled time until 2 hours after its planned end.',
+        not_in_progress: 'Only an in-progress walk can be completed.',
+        missing_started_at: 'This walk has no valid start time. Please contact DOJO WALK support.',
+        too_early_to_complete: 'A walk must be in progress for at least 5 minutes before it can be completed.',
+      };
+      throw new HttpsError('failed-precondition', messages[transition.reason]);
+    }
+    if (transition.status === 'in_progress') {
       tx.update(bookingRef, { status: 'in_progress', startedAt: now, updatedAt: now });
       return 'in_progress';
-    }
-    if (booking.status !== 'in_progress' || !(booking.startedAt instanceof Timestamp)) {
-      throw new HttpsError('failed-precondition', 'Only an in-progress walk can be completed.');
-    }
-    if (now.toMillis() < booking.startedAt.toMillis() + 5 * 60 * 1000) {
-      throw new HttpsError('failed-precondition', 'A walk must be in progress for at least 5 minutes before it can be completed.');
     }
     const reservationRef = typeof booking.reservationId === 'string'
       ? walkerRef.collection('reservations').doc(booking.reservationId) : null;
