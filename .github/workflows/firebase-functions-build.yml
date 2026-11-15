@@ -22,6 +22,9 @@ on:
       - ".github/workflows/deploy-firestore-config.yml"
       - ".github/workflows/deploy-walker-functions.yml"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -52,6 +55,18 @@ jobs:
           path: functions/package-lock.json
           if-no-files-found: error
           retention-days: 7
+      - name: Commit generated dependency lockfile
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feat/orange-primary-blue-secondary'
+        run: |
+          git add functions/package-lock.json
+          if git diff --cached --quiet; then
+            echo 'Dependency lockfile is already committed.'
+          else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'build: commit resolved backend dependency lockfile'
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
       - name: Report resolved Firebase toolchain versions
         working-directory: functions
         run: npm ls firebase firebase-admin firebase-functions firebase-tools @firebase/rules-unit-testing @grpc/grpc-js glob minimatch uuid --depth=3 || true
