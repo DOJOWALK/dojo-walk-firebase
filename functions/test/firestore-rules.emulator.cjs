@@ -31,6 +31,10 @@ test.before(async () => {
       walkerId: 'walker-1',
       status: 'confirmed',
     });
+    await setDoc(doc(db, 'bookingSeries/series-1'), {
+      customerId: 'customer-1',
+      status: 'draft',
+    });
     await setDoc(doc(db, 'pricingAuditLogs/log-1'), { newAmountPaise: 10000 });
   });
 });
@@ -66,6 +70,21 @@ test('booking reads are limited to the assigned customer, walker, and admin', as
   await assertFails(getDoc(doc(other, 'bookings/booking-1')));
   await assertSucceeds(getDoc(doc(walker, 'bookings/booking-1')));
   await assertSucceeds(getDoc(doc(admin, 'bookings/booking-1')));
+});
+
+test('recurring series documents remain server-only through direct Firestore access', async () => {
+  const customer = testEnv.authenticatedContext('customer-1').firestore();
+  const admin = testEnv.authenticatedContext('admin-1', { admin: true }).firestore();
+  await assertFails(getDoc(doc(customer, 'bookingSeries/series-1')));
+  await assertFails(getDoc(doc(admin, 'bookingSeries/series-1')));
+  await assertFails(setDoc(doc(customer, 'bookingSeries/fake-customer'), {
+    customerId: 'customer-1',
+    status: 'active',
+  }));
+  await assertFails(setDoc(doc(admin, 'bookingSeries/fake-admin'), {
+    customerId: 'customer-1',
+    status: 'active',
+  }));
 });
 
 test('booking, walker, reservation, and server audit writes stay server-only', async () => {
