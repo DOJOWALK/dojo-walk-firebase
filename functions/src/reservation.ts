@@ -32,6 +32,12 @@ export async function reserveWalkerTransaction(
 
     // Candidate discovery is advisory only; all authorization uses fresh transactional data.
     const freshData = freshBooking.data()!;
+    if (typeof freshData.seriesId === 'string') {
+      const seriesSnap = await tx.get(db.collection('bookingSeries').doc(freshData.seriesId));
+      if (!seriesSnap.exists || seriesSnap.data()?.status === 'paused') {
+        throw new HttpsError('failed-precondition', 'This recurring schedule is paused. Resume it before reserving another walk.');
+      }
+    }
     const freshEligibleIds = Array.isArray(freshData.eligibleWalkerIds)
       ? freshData.eligibleWalkerIds : [];
     if (!(freshData.scheduledAt instanceof Timestamp)
