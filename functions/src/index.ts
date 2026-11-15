@@ -550,9 +550,18 @@ export const reserveWalkerForBooking = onCall(async (request) => {
     throw new HttpsError('not-found', 'Booking request was not found.');
   }
   let booking = bookingSnap.data()!;
-  if (booking.status === 'walker_held'
-      && booking.reservationExpiresAt instanceof Timestamp
-      && booking.reservationExpiresAt.toMillis() <= Date.now()
+  const holdExpired = booking.status === 'walker_held'
+    && booking.reservationExpiresAt instanceof Timestamp
+    && booking.reservationExpiresAt.toMillis() <= Date.now();
+  const paymentOrderNeedsReconciliation = ['creating', 'created', 'reconciliation_required']
+    .includes(booking.paymentOrderStatus)
+    || typeof booking.razorpayOrderId === 'string'
+    || typeof booking.paymentId === 'string';
+  if (holdExpired && paymentOrderNeedsReconciliation) {
+    throw new HttpsError('failed-precondition',
+      'This booking has a payment order that must be reconciled before another walker can be reserved. Please contact support.');
+  }
+  if (holdExpired
       && typeof booking.walkerId === 'string'
       && typeof booking.reservationId === 'string') {
     await db.runTransaction(async (tx) => {
