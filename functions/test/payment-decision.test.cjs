@@ -29,3 +29,4 @@ test('order, amount, currency and capture mismatches are rejected', () => {
     { paymentStatus: 'authorized' }, { paymentCaptured: false },
   ]) assert.equal(decideCapturedPayment({ ...valid, ...patch }), 'reject');
 });
+
