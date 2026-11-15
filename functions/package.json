@@ -11,7 +11,8 @@
     "set-admin-claim": "node scripts/set-admin-claim.mjs",
     "test": "npm run build && node --test test/*.test.cjs",
     "test:rules": "firebase emulators:exec --only firestore --project demo-dojo-walk --config ../firebase.json \"node --test test/firestore-rules.emulator.cjs\"",
-    "test:payment-emulator": "firebase emulators:exec --only firestore --project demo-dojo-walk --config ../firebase.json \"node --test test/payment-finalizer.emulator.cjs\""
+    "test:payment-emulator": "firebase emulators:exec --only firestore --project demo-dojo-walk --config ../firebase.json \"node --test test/payment-finalizer.emulator.cjs\"",
+    "test:reservation-emulator": "firebase emulators:exec --only firestore --project demo-dojo-walk --config ../firebase.json \"node --test test/reservation.emulator.cjs\""
   },
   "dependencies": {
     "firebase-admin": "^12.7.0",
