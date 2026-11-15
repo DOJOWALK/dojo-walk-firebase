@@ -1682,7 +1682,7 @@ export const verifyRazorpayCheckout = onCall(
       throw new HttpsError('failed-precondition', 'Payment is not captured for this booking order yet.');
     }
     try {
-      return await finalizeCapturedRazorpayPayment(bookingId, payment, 'checkout');
+      return await finalizeCapturedRazorpayPayment(db, bookingId, payment, 'checkout');
     } catch (_) {
       throw new HttpsError('failed-precondition', 'Payment was received but booking confirmation needs support review.');
     }
@@ -1745,7 +1745,7 @@ export const razorpayWebhook = onRequest(
         return;
       }
       const bookingId = bookings.docs[0].id;
-      await finalizeCapturedRazorpayPayment(bookingId, payment, 'webhook');
+      await finalizeCapturedRazorpayPayment(db, bookingId, payment, 'webhook');
       await eventRef.create({
         event: event.event,
         paymentId: payment.id,
