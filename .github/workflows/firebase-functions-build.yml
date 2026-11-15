@@ -127,7 +127,7 @@ jobs:
           NODE
       - name: Enforce production dependency security threshold
         working-directory: functions
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --omit=dev --audit-level=moderate
 
       - name: Build and payment signature unit tests
         working-directory: functions
