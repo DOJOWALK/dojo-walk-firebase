@@ -37,5 +37,7 @@ export function createRecurringRequestFingerprint(
   return sha256(JSON.stringify({
     ...input,
     weekdays: [...input.weekdays].sort((a, b) => a - b),
+    timeSlots: [...input.timeSlots].sort((a, b) =>
+      a.localTime.localeCompare(b.localTime) || a.id.localeCompare(b.id)),
   }));
 }
