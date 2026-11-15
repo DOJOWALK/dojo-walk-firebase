@@ -2,7 +2,7 @@ name: Firebase Functions and Firestore Config Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/orange-primary-blue-secondary]
     paths:
       - "functions/**"
       - "firebase.json"
