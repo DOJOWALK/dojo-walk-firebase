@@ -55,7 +55,9 @@ jobs:
           try {
             report = JSON.parse(fs.readFileSync('npm-audit.json', 'utf8'));
           } catch {
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, 'Dependency audit report unavailable.\\n');
+            const message = 'Dependency audit report unavailable.\n';
+            console.log(message);
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, message);
             process.exit(0);
           }
           const vulnerabilities = report.vulnerabilities || {};
@@ -68,14 +70,26 @@ jobs:
             ...['critical', 'high', 'moderate', 'low', 'info'].map((level) =>
               `| ${level} | ${counts[level] ?? 0} |`),
             '',
-            '| Package | Severity | Direct | Fix available |',
-            '|---|---|---|---|',
-            ...Object.entries(vulnerabilities).map(([name, item]) =>
-              `| ${name} | ${item.severity} | ${item.isDirect ? 'yes' : 'no'} | ${item.fixAvailable ? JSON.stringify(item.fixAvailable) : 'no'} |`),
-            '',
+            '| Package | Severity | Direct | Advisory | Vulnerable range | Fix available |',
+            '|---|---|---|---|---|---|',
           ];
-          console.log(lines.join('\\n'));
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\\n'));
+          for (const [name, item] of Object.entries(vulnerabilities)) {
+            const advisories = (item.via || []).filter((entry) => entry && typeof entry === 'object');
+            if (advisories.length === 0) {
+              lines.push(`| ${name} | ${item.severity} | ${item.isDirect ? 'yes' : 'no'} | transitive dependency | — | ${item.fixAvailable ? JSON.stringify(item.fixAvailable) : 'no'} |`);
+              continue;
+            }
+            for (const advisory of advisories) {
+              const title = String(advisory.title || advisory.name || 'Advisory').replaceAll('|', '/');
+              const url = advisory.url ? ` (${advisory.url})` : '';
+              const range = String(advisory.range || '—').replaceAll('|', '/');
+              lines.push(`| ${name} | ${item.severity} | ${item.isDirect ? 'yes' : 'no'} | ${title}${url} | ${range} | ${item.fixAvailable ? JSON.stringify(item.fixAvailable) : 'no'} |`);
+            }
+          }
+          lines.push('');
+          const output = lines.join('\n');
+          console.log(output);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, output);
           NODE
       - name: Build and payment signature unit tests
         working-directory: functions
