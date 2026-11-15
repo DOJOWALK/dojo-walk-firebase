@@ -45,6 +45,9 @@ jobs:
       - name: Install dependencies
         working-directory: functions
         run: npm install
+      - name: Report resolved Firebase toolchain versions
+        working-directory: functions
+        run: npm ls firebase firebase-admin firebase-functions firebase-tools @firebase/rules-unit-testing @grpc/grpc-js glob minimatch uuid --depth=3 || true
       - name: Report dependency audit details
         working-directory: functions
         run: |
