@@ -59,6 +59,15 @@ test('weekday selection order does not change the request fingerprint', () => {
   );
 });
 
+test('time slot selection order does not change the request fingerprint', () => {
+  const reversed = [...request.timeSlots, { id: 'evening', localTime: '19:00' }];
+  const forward = [...request.timeSlots, { id: 'evening', localTime: '19:00' }];
+  assert.equal(
+    createRecurringRequestFingerprint({ ...request, timeSlots: forward }),
+    createRecurringRequestFingerprint({ ...request, timeSlots: [...reversed].reverse() }),
+  );
+});
+
 test('changing a material schedule or consent detail changes the request fingerprint', () => {
   const fingerprint = createRecurringRequestFingerprint(request);
   assert.notEqual(
