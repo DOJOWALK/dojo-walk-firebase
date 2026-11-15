@@ -74,6 +74,7 @@ jobs:
               `| ${name} | ${item.severity} | ${item.isDirect ? 'yes' : 'no'} | ${item.fixAvailable ? JSON.stringify(item.fixAvailable) : 'no'} |`),
             '',
           ];
+          console.log(lines.join('\\n'));
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\\n'));
           NODE
       - name: Build and payment signature unit tests
