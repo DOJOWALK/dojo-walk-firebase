@@ -141,6 +141,9 @@ jobs:
       - name: Payment finalizer Firestore emulator tests
         working-directory: functions
         run: npm run test:payment-emulator
+      - name: No-payment booking confirmation and cancellation emulator tests
+        working-directory: functions
+        run: npm run test:no-payment-emulator
       - name: Walker reservation concurrency Firestore emulator tests
         working-directory: functions
         run: npm run test:reservation-emulator
