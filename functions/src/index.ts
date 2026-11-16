@@ -727,7 +727,7 @@ export const submitWalkerApplication = onCall(async (request) => {
   const verifiedTokenPhone = typeof request.auth.token.phone_number === 'string'
     ? request.auth.token.phone_number.replace(/\D/g, '').slice(-10)
     : '';
-  if (verifiedTokenPhone && verifiedTokenPhone !== phone) {
+  if (!verifiedTokenPhone || verifiedTokenPhone !== phone) {
     throw new HttpsError('permission-denied', 'The application phone must match your verified sign-in number.');
   }
   const city = typeof data.city === 'string' ? data.city : '';
@@ -1031,7 +1031,23 @@ export const getWalkerApplication = onCall(async (request) => {
     throw new HttpsError('unauthenticated', 'Sign in to view your walker application.');
   }
   const snap = await db.collection('walkers').doc(request.auth.uid).get();
-  if (!snap.exists) return { exists: false, status: 'not_submitted' };
+  if (!snap.exists) {
+    const verifiedPhone = typeof request.auth.token.phone_number === 'string'
+      ? request.auth.token.phone_number.replace(/\D/g, '').slice(-10)
+      : '';
+    if (verifiedPhone) {
+      const legacyMatch = await db.collection('walkers')
+        .where('phone', '==', verifiedPhone)
+        .limit(1)
+        .get();
+      if (!legacyMatch.empty && legacyMatch.docs[0].id !== request.auth.uid) {
+        // Do not create a duplicate profile or transfer a legacy account solely
+        // because the same phone number is now verified by a new Firebase UID.
+        return { exists: false, status: 'migration_required' };
+      }
+    }
+    return { exists: false, status: 'not_submitted' };
+  }
   const data = snap.data()!;
   return {
     exists: true,
