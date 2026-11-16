@@ -24,7 +24,7 @@ function callable(fn, uid, bookingId) {
 }
 
 async function seedHeldBooking(overrides = {}) {
-  const bookingId = 'no-pay-' + randomUUID().replaceAll('-', '');
+  const bookingId = 'nopay' + randomUUID().replaceAll('-', '');
   const walkerId = 'walker-' + bookingId;
   const reservationId = 'reservation-' + bookingId;
   const bookingRef = db.collection('bookings').doc(bookingId);
@@ -148,7 +148,7 @@ test('customer can cancel a future confirmed no-payment booking and its reservat
 });
 
 test('customer can cancel an unpaid draft without a reservation', async () => {
-  const bookingId = 'no-pay-draft-' + randomUUID().replaceAll('-', '');
+  const bookingId = 'nopaydraft' + randomUUID().replaceAll('-', '');
   const bookingRef = db.collection('bookings').doc(bookingId);
   await bookingRef.set({ customerId, status: 'draft', paymentStatus: 'unpaid' });
 
