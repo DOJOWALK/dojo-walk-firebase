@@ -1038,6 +1038,7 @@ export const getWalkerApplication = onCall(async (request) => {
     status: data.applicationStatus ?? (data.active === true ? 'approved' : 'pending'),
     displayName: data.displayName ?? '',
     phone: data.phone ?? '',
+    email: data.email ?? '',
     city: data.applicationCity ?? '',
     pincode: data.applicationPincode ?? '',
     active: data.active === true,
