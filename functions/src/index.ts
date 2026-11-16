@@ -762,7 +762,7 @@ export const submitWalkerApplication = onCall(async (request) => {
   } else {
     await ref.set({
       displayName,
-      email: request.auth.token.email ?? null,
+      email: email || null,
       phone,
       applicationCity: city,
       applicationPincode: pincode,
