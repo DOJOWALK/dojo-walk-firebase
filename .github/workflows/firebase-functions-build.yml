@@ -2,7 +2,7 @@ name: Firebase Functions and Firestore Config Build
 
 on:
   push:
-    branches: [main, feat/orange-primary-blue-secondary]
+    branches: [main, feat/orange-primary-blue-secondary, feat/no-payment-booking]
     paths:
       - "functions/**"
       - "firebase.json"
@@ -12,7 +12,7 @@ on:
       - ".github/workflows/deploy-firestore-config.yml"
       - ".github/workflows/deploy-walker-functions.yml"
   pull_request:
-    branches: [main, feat/orange-primary-blue-secondary]
+    branches: [main, feat/orange-primary-blue-secondary, feat/no-payment-booking]
     paths:
       - "functions/**"
       - "firebase.json"
@@ -141,6 +141,9 @@ jobs:
       - name: Payment finalizer Firestore emulator tests
         working-directory: functions
         run: npm run test:payment-emulator
+      - name: No-payment booking confirmation and cancellation emulator tests
+        working-directory: functions
+        run: npm run test:no-payment-emulator
       - name: Walker reservation concurrency Firestore emulator tests
         working-directory: functions
         run: npm run test:reservation-emulator
