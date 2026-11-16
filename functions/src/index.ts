@@ -978,6 +978,9 @@ export const confirmBookingWithoutPayment = onCall(async (request) => {
       throw new HttpsError('not-found', 'Booking request was not found.');
     }
     const booking = bookingSnap.data()!;
+    if (booking.status === 'confirmed' && booking.paymentStatus === 'not_required') {
+      return { bookingId, status: 'confirmed', paymentStatus: 'not_required' };
+    }
     if (booking.status !== 'walker_held' || booking.paymentStatus !== 'unpaid'
         || typeof booking.walkerId !== 'string' || typeof booking.reservationId !== 'string'
         || !(booking.reservationExpiresAt instanceof Timestamp)
