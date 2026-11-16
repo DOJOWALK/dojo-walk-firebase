@@ -961,6 +961,72 @@ export const getWalkerDashboard = onCall(async (request) => {
   };
 });
 
+export const confirmBookingWithoutPayment = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in to confirm this booking.');
+  }
+  const uid = request.auth.uid;
+  const bookingId = request.data?.bookingId;
+  if (typeof bookingId !== 'string' || !/^[A-Za-z0-9]{1,128}$/.test(bookingId)) {
+    throw new HttpsError('invalid-argument', 'A valid booking ID is required.');
+  }
+
+  const bookingRef = db.collection('bookings').doc(bookingId);
+  const now = Timestamp.now();
+
+  return db.runTransaction(async (tx) => {
+    const bookingSnap = await tx.get(bookingRef);
+    if (!bookingSnap.exists || bookingSnap.data()?.customerId !== uid) {
+      throw new HttpsError('not-found', 'Booking request was not found.');
+    }
+    const booking = bookingSnap.data()!;
+    if (booking.status !== 'walker_held' || booking.paymentStatus !== 'unpaid'
+        || typeof booking.walkerId !== 'string'
+        || typeof booking.reservationId !== 'string'
+        || !(booking.reservationExpiresAt instanceof Timestamp)
+        || booking.reservationExpiresAt.toMillis() <= now.toMillis()
+        || ['creating', 'created', 'reconciliation_required'].includes(booking.paymentOrderStatus)
+        || typeof booking.razorpayOrderId === 'string'
+        || typeof booking.paymentId === 'string') {
+      throw new HttpsError(
+        'failed-precondition',
+        'This booking cannot be confirmed. Its walker hold may have expired or a payment order may already exist.',
+      );
+    }
+
+    const walkerRef = db.collection('walkers').doc(booking.walkerId);
+    const reservationRef = walkerRef.collection('reservations').doc(booking.reservationId);
+    const [walkerSnap, reservationSnap] = await Promise.all([
+      tx.get(walkerRef),
+      tx.get(reservationRef),
+    ]);
+    if (!walkerSnap.exists || walkerSnap.data()?.active !== true
+        || walkerSnap.data()?.applicationStatus !== 'approved'
+        || !reservationSnap.exists
+        || reservationSnap.data()?.status !== 'held'
+        || !(reservationSnap.data()?.expiresAt instanceof Timestamp)
+        || reservationSnap.data()!.expiresAt.toMillis() <= now.toMillis()) {
+      throw new HttpsError(
+        'failed-precondition',
+        'The walker hold is no longer valid. Please check availability and book again.',
+      );
+    }
+
+    tx.update(reservationRef, {
+      status: 'confirmed',
+      confirmedAt: now,
+    });
+    tx.update(bookingRef, {
+      status: 'confirmed',
+      paymentStatus: 'not_required',
+      paymentMethod: 'none',
+      confirmedAt: now,
+      updatedAt: now,
+    });
+    return { bookingId, status: 'confirmed', paymentStatus: 'not_required' };
+  });
+});
+
 export const cancelCustomerBooking = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to cancel a booking.');
   const bookingId = request.data?.bookingId;
@@ -975,13 +1041,21 @@ export const cancelCustomerBooking = onCall(async (request) => {
       throw new HttpsError('not-found', 'Booking was not found.');
     }
     const booking = bookingSnap.data()!;
-    if (!['draft', 'walker_held'].includes(booking.status)
-        || booking.paymentStatus !== 'unpaid'
-        || ['creating', 'created', 'reconciliation_required'].includes(booking.paymentOrderStatus)
-        || typeof booking.razorpayOrderId === 'string'
-        || typeof booking.paymentId === 'string') {
+    const hasNoPaymentOrder = !['creating', 'created', 'reconciliation_required'].includes(booking.paymentOrderStatus)
+      && typeof booking.razorpayOrderId !== 'string'
+      && typeof booking.paymentId !== 'string';
+    const canCancelBeforeConfirmation = ['draft', 'walker_held'].includes(booking.status)
+      && booking.paymentStatus === 'unpaid'
+      && hasNoPaymentOrder;
+    const canCancelConfirmedNoPayment = booking.status === 'confirmed'
+      && booking.paymentStatus === 'not_required'
+      && booking.scheduledAt instanceof Timestamp
+      && booking.scheduledAt.toMillis() > now.toMillis()
+      && !(booking.startedAt instanceof Timestamp)
+      && hasNoPaymentOrder;
+    if (!canCancelBeforeConfirmation && !canCancelConfirmedNoPayment) {
       throw new HttpsError('failed-precondition',
-        'Only unpaid bookings with no payment order can be cancelled in the app. If payment was started, please contact support so the payment can be checked safely.');
+        'Only unpaid requests or future confirmed bookings with no payment can be cancelled in the app.');
     }
     let reservationRef: DocumentReference | null = null;
     let reservationSnap: DocumentSnapshot | null = null;
