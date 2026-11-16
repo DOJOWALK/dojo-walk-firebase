@@ -17,10 +17,10 @@ test.before(() => {
 });
 
 function callable(fn, uid, bookingId) {
-  return fn.run(
-    { bookingId },
-    { auth: uid ? { uid, token: {} } : null },
-  );
+  return fn.run({
+    data: { bookingId },
+    auth: uid ? { uid, token: {} } : null,
+  });
 }
 
 async function seedHeldBooking(overrides = {}) {
