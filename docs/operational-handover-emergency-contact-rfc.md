@@ -117,3 +117,35 @@ Every callable must reject client-supplied actor IDs, timestamps, roles, assignm
 - Emulator tests validate Firestore rules and callable authorization before any deployment.
 
 **No schema, callable, Firestore rule, or app UI change is authorized by this RFC. It records a safe proposal and explicit decision gates only.**
+
+
+## 9. Decision register and implementation go/no-go
+
+Use this register in a product/operations/privacy/legal review. **All entries begin as open; no default or implied approval is granted by this RFC.** Record the named decision owner, approved wording/policy, date, and evidence before changing an entry to approved.
+
+| Decision area | Required recorded outcome | Accountable reviewer(s) | Status |
+|---|---|---|---|
+| Emergency-contact requirement | Optional/mandatory policy by booking type, and any exception path | Product + Operations | Open |
+| Third-party permission and customer consent | Approved consent copy, confirmation method, and handling when permission is unavailable | Privacy + Legal + Product | Open |
+| Walker-visible handover | Exact field allowlist, booking states, access start/end, and reassignment revocation behavior | Operations + Privacy | Open |
+| Customer unreachable / urgent veterinary care | Step-by-step escalation tree, emergency thresholds, fallback contacts, and out-of-hours procedure | Operations | Open |
+| Treatment authorization and payment | Who can authorize treatment, spending limits if any, and payment responsibility | Product + Operations + Legal | Open |
+| Service coverage and response targets | Named operational owner, staffed hours, response-time targets, and escalation backup | Operations | Open |
+| Retention, deletion, and access audit | Retention periods by data type, deletion triggers, access-review cadence, and breach process | Privacy + Legal + Security | Open |
+| Photos and other evidence | Allowed evidence types, upload controls, access, retention, and deletion safeguards | Privacy + Security + Operations | Open |
+| Incident triage ownership | Admin queue owner, severity definitions, assignment/closure authority, and audit reviewer | Operations + Admin owner | Open |
+
+### Required approval record
+
+For each decision above, capture:
+- Decision ID and final approved policy text.
+- Named accountable approver(s), role, approval date, and any conditions.
+- Customer-facing wording or operational runbook reference, where applicable.
+- Data classification, retention/deletion rule, and access scope affected.
+- Testable acceptance criteria and the person responsible for sign-off.
+
+### Go/no-go rule
+
+Implementation may be proposed only after every applicable decision is approved and the operational runbook exists. Then create a separate implementation plan covering schema migration, callable authorization, Firestore rules, audit logging, app UX, emulator/security tests, rollout, support training, and rollback. Any unresolved emergency escalation, consent, access, or retention decision is a **no-go** for collecting or exposing the corresponding sensitive data.
+
+This register is a review aid, not evidence that any stakeholder has approved the proposed design.
