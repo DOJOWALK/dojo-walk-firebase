@@ -720,6 +720,10 @@ export const submitWalkerApplication = onCall(async (request) => {
   const data = request.data ?? {};
   const displayName = typeof data.displayName === 'string' ? data.displayName.trim() : '';
   const phone = typeof data.phone === 'string' ? data.phone.replace(/\D/g, '') : '';
+  const email = typeof data.email === 'string' ? data.email.trim().toLowerCase() : '';
+  if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+    throw new HttpsError('invalid-argument', 'Enter a valid email address or leave it blank.');
+  }
   const verifiedTokenPhone = typeof request.auth.token.phone_number === 'string'
     ? request.auth.token.phone_number.replace(/\D/g, '').slice(-10)
     : '';
@@ -750,6 +754,7 @@ export const submitWalkerApplication = onCall(async (request) => {
     await ref.set({
       displayName,
       phone,
+      email: email || null,
       applicationCity: city,
       applicationPincode: pincode,
       updatedAt: Timestamp.now(),
