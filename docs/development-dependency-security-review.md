@@ -1,17 +1,18 @@
 # Development Dependency Security Review
 
-**Reviewed:** 2026-11-15  
+**Reviewed:** 2026-11-15; rechecked 2026-11-16  
 **Repository:** `DOJOWALK/dojo-walk-firebase`  
 **Branch:** `feat/orange-primary-blue-secondary`  
-**Evidence:** Initial audit run [#130](https://github.com/DOJOWALK/dojo-walk-firebase/actions/runs/43712217219); latest verified CI run [#135](https://github.com/DOJOWALK/dojo-walk-firebase/actions/runs/43716452908), commit `4dc451d8c94eb74f4cdcde3ecb796f347ecf16ab`.
+**Evidence:** Initial audit run [#130](https://github.com/DOJOWALK/dojo-walk-firebase/actions/runs/43712217219); prior full test run [#135](https://github.com/DOJOWALK/dojo-walk-firebase/actions/runs/43716452908), commit `4dc451d8c94eb74f4cdcde3ecb796f347ecf16ab`; latest branch CI [#43878046641](https://github.com/DOJOWALK/dojo-walk-firebase/actions/runs/43878046641), commit `0919a533a5fb202c59402fafb9cbe50fef4b4f27`.
 
 ## Current audit position
 
-- Production dependency audit (`npm audit --omit=dev`): 0 critical, 0 high, 0 moderate, 0 low, 0 info.
+- Production dependency audit (`npm audit --omit=dev`): 0 critical, 0 high, 0 moderate, 0 low, 0 info in the reviewed audit.
 - Full dependency tree: 13 moderate-severity affected package entries; no high or critical findings.
 - The affected packages reported by the full audit are in the development/test toolchain. The production-only audit is clean.
-- Latest CI run #135 passed all 35 tests: build/unit 17, Firestore rules 5, payment finalizer 5, walker reservation 4, recurring-series lifecycle 4.
-- CI now enforces `npm audit --audit-level=high` across the full dependency tree and `npm audit --omit=dev --audit-level=moderate` for production dependencies. Both gates passed in run #135.
+- Latest CI run #43878046641 passed the full-tree High/Critical threshold and production Moderate+ threshold, along with build/unit tests and all Firestore Emulator suites.
+- CI enforces `npm audit --audit-level=high` across the full dependency tree and `npm audit --omit=dev --audit-level=moderate` for production dependencies.
+- Passing the configured CI thresholds does not mean every development dependency is advisory-free; the 13 Moderate development/test findings remain documented below.
 
 ## Advisory review and dependency constraints
 
@@ -26,10 +27,10 @@ The full audit also reports transitive package entries for `archiver`, `archiver
 
 ## Latest upstream compatibility check
 
-- On 2026-11-15, npm lists `firebase-tools@15.36.0` as the `latest` tag; the Firebase CLI release history also identifies v15.36.0 as the newest release. The repository already pins this version through `^15.36.0` and its lockfile.
+- Rechecked on 2026-11-16: npm's `latest` tag and the official Firebase CLI release listing still identify `firebase-tools@15.36.0` as the latest stable release. The repository already uses this version through `^15.36.0` and its lockfile.
 - The current CLI dependency graph includes `@google-cloud/pubsub@5.3.1`, `archiver@7.0.1`, `exegesis@4.3.0`, `gaxios@6.7.1`, and `glob@10.5.0`. The audited vulnerable ranges are pulled in by those declared dependencies.
 - The npm audit's suggested automatic fix is a downgrade to `firebase-tools@13.11.2` and is marked SemVer-major. It is not an acceptable automatic security update: it would roll back two major CLI generations and could regress emulator/CI behavior.
-- No newer stable Firebase CLI release was available in this review to test as a remediation. Therefore no dependency version or override was changed. Re-evaluate when Firebase CLI updates its dependency ranges or publishes a newer stable release.
+- No newer stable Firebase CLI release or compatible owning-package range change was identified in this recheck. No dependency version or override was changed. Re-evaluate when Firebase CLI updates its dependency ranges or publishes a newer stable release.
 
 ## Remediation decision
 
