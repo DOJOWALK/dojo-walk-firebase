@@ -1,0 +1,63 @@
+name: Deploy Firebase Functions (Mumbai sequential)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify deployment credential is configured
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3 }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::Missing repository secret FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3"
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3 }}
+          project_id: dojo-platform-b68a3
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools
+
+      - name: Install Functions dependencies
+        working-directory: functions
+        run: npm install
+
+      - name: Compile TypeScript
+        working-directory: functions
+        run: npm run build
+
+      - name: Select and deploy Mumbai Functions one at a time
+        working-directory: functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t names < <(node -e "const fs=require('node:fs'); const s=fs.readFileSync('src/index.ts','utf8'); const n=[...s.matchAll(/^export\\s+const\\s+([A-Za-z_$][\\w$]*Mumbai)\\s*=/gm)].map(m=>m[1]); if(!n.length) throw new Error('No Mumbai functions found; refusing to deploy.'); process.stdout.write(n.join('\\n')+'\\n');")
+          echo "Found ${#names[@]} Mumbai functions."
+          for name in "${names[@]}"; do
+            echo "::group::Deploying $name to asia-south1"
+            firebase deploy --only "functions:$name" --project dojo-platform-b68a3 --non-interactive
+            echo "::endgroup::"
+            # Avoid sending a burst of Cloud Run Functions write requests.
+            sleep 3
+          done
