@@ -1582,3 +1582,32 @@ export const setAdminServiceArea = onCall(async (request) => {
   return { city, pincode, enabled };
 });
 
+
+
+// Parallel Mumbai endpoints: keep legacy us-central1 endpoints available during cutover.
+export const createBookingDraftMumbai = createBookingDraft;
+export const createRecurringBookingSeriesMumbai = createRecurringBookingSeries;
+export const refreshRecurringOccurrenceQuoteMumbai = refreshRecurringOccurrenceQuote;
+export const reserveWalkerForBookingMumbai = reserveWalkerForBooking;
+export const releaseWalkerHoldMumbai = releaseWalkerHold;
+export const submitWalkerApplicationMumbai = submitWalkerApplication;
+export const saveWalkerAvailabilityMumbai = saveWalkerAvailability;
+export const updateWalkerBookingStatusMumbai = updateWalkerBookingStatus;
+export const getWalkerDashboardMumbai = getWalkerDashboard;
+export const confirmBookingWithoutPaymentMumbai = confirmBookingWithoutPayment;
+export const cancelCustomerBookingMumbai = cancelCustomerBooking;
+export const getCustomerBookingsMumbai = getCustomerBookings;
+export const getWalkerApplicationMumbai = getWalkerApplication;
+export const listPendingWalkerApplicationsMumbai = listPendingWalkerApplications;
+export const listAdminBookingsMumbai = listAdminBookings;
+export const pauseCustomerBookingSeriesMumbai = pauseCustomerBookingSeries;
+export const resumeCustomerBookingSeriesMumbai = resumeCustomerBookingSeries;
+export const getCustomerBookingSeriesMumbai = getCustomerBookingSeries;
+export const listCustomerBookingSeriesMumbai = listCustomerBookingSeries;
+export const listAdminBookingSeriesMumbai = listAdminBookingSeries;
+export const reviewWalkerApplicationMumbai = reviewWalkerApplication;
+export const getBookingPricingMumbai = getBookingPricing;
+export const setBookingPricingMumbai = setBookingPricing;
+export const getPricingAuditLogsMumbai = getPricingAuditLogs;
+export const getAdminServiceAreasMumbai = getAdminServiceAreas;
+export const setAdminServiceAreaMumbai = setAdminServiceArea;
