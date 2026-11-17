@@ -56,13 +56,13 @@ jobs:
           node <<'NODE'
           const fs = require('node:fs');
           const source = fs.readFileSync('src/index.ts', 'utf8');
-          const names = [...source.matchAll(/^export\\s+(?:const|let|var|function|async\\s+function)\\s+([A-Za-z_$][\\w$]*)/gm)]
+          const names = [...source.matchAll(/^export\s+(?:const|let|var|function|async\s+function)\s+([A-Za-z_$][\w$]*)/gm)]
             .map((match) => match[1]);
           if (names.length === 0) {
             throw new Error('No exported Firebase Functions found in functions/src/index.ts; refusing to deploy.');
           }
           const selectors = names.map((name) => `functions:${name}`).join(',');
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `selectors=${selectors}\\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `selectors=${selectors}\n`);
           console.log(`Selected ${names.length} current Functions: ${names.join(', ')}`);
           NODE
 
