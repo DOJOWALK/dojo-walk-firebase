@@ -62,7 +62,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t names < <(node -e "const fs=require('node:fs'); const s=fs.readFileSync('src/index.ts','utf8'); const n=[...s.matchAll(/^export\\s+const\\s+([A-Za-z_$][\\w$]*Mumbai)\\s*=/gm)].map(m=>m[1]); if(!n.length) throw new Error('No Mumbai functions found; refusing to deploy.'); process.stdout.write(n.join('\\n')+'\\n');")
+          mapfile -t names < <(node -e "const fs=require('node:fs'); const s=fs.readFileSync('src/index.ts','utf8'); const n=[...s.matchAll(/^export\s+const\s+([A-Za-z_$][\w$]*Mumbai)\s*=/gm)].map(m=>m[1]); if(!n.length) throw new Error('No Mumbai functions found; refusing to deploy.'); process.stdout.write(n.join('\n')+'\n');")
           echo "Found ${#names[@]} Mumbai functions."
           for name in "${names[@]}"; do
             echo "::group::Deploying $name to asia-south1"
