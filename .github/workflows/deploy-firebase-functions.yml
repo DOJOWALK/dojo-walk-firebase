@@ -48,7 +48,7 @@ jobs:
         working-directory: functions
         run: npm run build
 
-      - name: Select only Functions exported by the current source
+      - name: Select only parallel Mumbai Functions
         id: function-targets
         working-directory: functions
         shell: bash
@@ -56,14 +56,14 @@ jobs:
           node <<'NODE'
           const fs = require('node:fs');
           const source = fs.readFileSync('src/index.ts', 'utf8');
-          const names = [...source.matchAll(/^export\s+(?:const|let|var|function|async\s+function)\s+([A-Za-z_$][\w$]*)/gm)]
+          const names = [...source.matchAll(/^export\s+const\s+([A-Za-z_$][\w$]*Mumbai)\s*=/gm)]
             .map((match) => match[1]);
           if (names.length === 0) {
-            throw new Error('No exported Firebase Functions found in functions/src/index.ts; refusing to deploy.');
+            throw new Error('No Mumbai-suffixed Firebase Functions found in functions/src/index.ts; refusing to deploy.');
           }
           const selectors = names.map((name) => `functions:${name}`).join(',');
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `selectors=${selectors}\n`);
-          console.log(`Selected ${names.length} current Functions: ${names.join(', ')}`);
+          console.log(`Selected ${names.length} parallel Mumbai Functions: ${names.join(', ')}`);
           NODE
 
       - name: Deploy only selected Firebase Functions
