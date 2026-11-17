@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, Timestamp, DocumentReference, DocumentSnapshot } from 'firebase-admin/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { setGlobalOptions } from 'firebase-functions/v2/options';
 import { recurringLocalDateTimeToDate } from './schedule';
 import { reserveWalkerTransaction } from './reservation';
 import { setCustomerBookingSeriesStatus } from './series-lifecycle';
@@ -10,6 +11,8 @@ import {
   createRecurringRequestFingerprint,
   createRecurringSeriesId,
 } from './recurring-identity';
+
+setGlobalOptions({ region: 'asia-south1' });
 
 initializeApp();
 const db = getFirestore();
