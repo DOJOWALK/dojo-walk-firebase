@@ -22,24 +22,36 @@ on:
       - ".github/workflows/deploy-firestore-config.yml"
       - ".github/workflows/deploy-walker-functions.yml"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Set up Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
       - name: Validate Firebase and Firestore configuration
         run: |
-          node -e "JSON.parse(require('fs').readFileSync('firebase.json', 'utf8'));"
-          node -e "JSON.parse(require('fs').readFileSync('firestore.indexes.json', 'utf8'));"
+          node -e "JSON.parse(require('node:fs').readFileSync('firebase.json', 'utf8'));"
+          node -e "JSON.parse(require('node:fs').readFileSync('firestore.indexes.json', 'utf8'));"
           test -s firestore.rules
-      - name: Install dependencies
+
+      - name: Install Functions dependencies
         working-directory: functions
-        run: npm install
+        run: npm install --no-audit --no-fund
+
       - name: Compile TypeScript
         working-directory: functions
         run: npm run build
