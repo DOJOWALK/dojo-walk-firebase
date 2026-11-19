@@ -555,10 +555,14 @@ const submitWalkerApplicationHandler: CallHandler = async (request) => {
     ? auth.token.phone_number.replace(/\D/g, '').slice(-10)
     : '';
 
-  if (verifiedPhone && verifiedPhone !== phone) {
+  if (
+    !verifiedPhone
+    || !/^[6-9]\d{9}$/.test(verifiedPhone)
+    || verifiedPhone !== phone
+  ) {
     throw new HttpsError(
       'permission-denied',
-      'Application phone must match your verified sign-in number.',
+      'Please sign in with a verified Indian mobile number matching your application phone.',
     );
   }
 
