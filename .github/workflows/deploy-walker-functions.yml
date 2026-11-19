@@ -32,7 +32,7 @@ jobs:
 
       - name: Verify deployment credential
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3 }}
+          FIREBASE_SERVICE_ACCOUNT: \${{ secrets.FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3 }}
         run: |
           if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
             echo "::error::Missing Firebase deployment credential"
@@ -42,7 +42,7 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3 }}
+          credentials_json: \${{ secrets.FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3 }}
           project_id: dojo-platform-b68a3
 
       - name: Set up Node.js
@@ -64,12 +64,12 @@ jobs:
       - name: Verify selected Functions
         id: targets
         env:
-          BATCH: ${{ inputs.batch }}
+          BATCH: \${{ inputs.batch }}
         run: |
           node <<'NODE'
           const fs = require('node:fs');
           const source = fs.readFileSync('functions/src/index.ts', 'utf8');
-          const actual = [...source.matchAll(/^export const ([A-Za-z0-9_]+)\\s*=/gm)]
+          const actual = [...source.matchAll(/^export const ([A-Za-z0-9_]+)\s*=/gm)]
             .map(match => match[1]);
 
           const batches = {
@@ -108,29 +108,29 @@ jobs:
 
           const missing = selected.filter(name => !actual.includes(name));
           if (missing.length) {
-            throw new Error(`Missing exports: ${missing.join(', ')}`);
+            throw new Error(\`Missing exports: \${missing.join(', ')}\`);
           }
 
           fs.appendFileSync(
             process.env.GITHUB_OUTPUT,
-            `functions=${selected.join(',')}\\n`
+            \`functions=\${selected.join(',')}\n\`
           );
 
-          console.log(`Selected ${selected.length} Functions.`);
+          console.log(\`Selected \${selected.length} Functions.\`);
           NODE
 
       - name: Deploy Functions one by one
         env:
-          FUNCTIONS: ${{ steps.targets.outputs.functions }}
+          FUNCTIONS: \${{ steps.targets.outputs.functions }}
         run: |
           IFS=',' read -ra TARGETS <<< "$FUNCTIONS"
 
-          for FUNCTION in "${TARGETS[@]}"; do
+          for FUNCTION in "\${TARGETS[@]}"; do
             echo "Deploying $FUNCTION"
 
-            firebase deploy \\
-              --only "functions:$FUNCTION" \\
-              --project dojo-platform-b68a3 \\
+            firebase deploy \
+              --only "functions:$FUNCTION" \
+              --project dojo-platform-b68a3 \
               --non-interactive
 
             echo "Successfully deployed $FUNCTION"
