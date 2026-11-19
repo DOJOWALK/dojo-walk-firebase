@@ -57,7 +57,7 @@ jobs:
           node <<'NODE'
           const fs = require('node:fs');
           const source = fs.readFileSync('functions/src/index.ts', 'utf8');
-          const actual = [...source.matchAll(/^export const ([A-Za-z0-9_]+)\\s*=/gm)]
+          const actual = [...source.matchAll(/^export const ([A-Za-z0-9_]+)\s*=/gm)]
             .map((match) => match[1])
             .sort();
           const expected = process.env.EXPECTED_FUNCTIONS.split(',').sort();
@@ -70,7 +70,7 @@ jobs:
             process.exit(1);
           }
           const targets = expected.map((name) => `functions:${name}`).join(',');
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `functions=${targets}\\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `functions=${targets}\n`);
           console.log(`Validated ${expected.length} Functions exports.`);
           NODE
 
