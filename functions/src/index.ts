@@ -140,7 +140,16 @@ const createBookingDraftHandler: CallHandler = async (request) => {
     petName,
     city,
     pincode,
+    requestId,
   } = data;
+
+  if (typeof requestId !== 'string'
+      || !/^[a-f0-9]{32}$/.test(requestId)) {
+    throw new HttpsError(
+      'invalid-argument',
+      'A valid booking request ID is required.',
+    );
+  }
 
   if (!Number.isInteger(durationMinutes)
       || !allowedDurations.has(durationMinutes)) {
@@ -157,7 +166,7 @@ const createBookingDraftHandler: CallHandler = async (request) => {
     );
   }
 
-  if (typeof pincode !== 'string' || !/^\d{6}$/.test(pincode)) {
+  if (typeof pincode !== 'string' || !/^\\d{6}$/.test(pincode)) {
     throw new HttpsError(
       'invalid-argument',
       'Enter a valid 6-digit pincode.',
@@ -198,38 +207,72 @@ const createBookingDraftHandler: CallHandler = async (request) => {
     );
   }
 
-  const end = new Date(
-    start.getTime() + durationMinutes * 60 * 1000,
-  );
-
-  const now = Timestamp.now();
-
-  const booking = {
-    customerId: auth.uid,
+  const normalized = {
     city,
     pincode,
     durationMinutes,
     address: address.trim(),
     petName: petName.trim(),
-
-    scheduledAt: Timestamp.fromDate(start),
-    endsAt: Timestamp.fromDate(end),
-
-    // Admin will assign a walker later.
-    walkerId: null,
-    assignedAt: null,
-    assignedBy: null,
-
-    status: 'confirmed',
-    confirmedAt: now,
-    createdAt: now,
-    updatedAt: now,
+    scheduledAt: start.toISOString(),
   };
+  const fingerprint = JSON.stringify(normalized);
 
-  const ref = await db.collection('bookings').add(booking);
+  const requestRef = db.collection('customers')
+    .doc(auth.uid)
+    .collection('bookingRequests')
+    .doc(requestId);
+  const bookingRef = db.collection('bookings').doc();
+  const startTimestamp = Timestamp.fromDate(start);
+  const endTimestamp = Timestamp.fromDate(
+    new Date(start.getTime() + durationMinutes * 60 * 1000),
+  );
+
+  const bookingId = await db.runTransaction(async (tx) => {
+    const requestSnap = await tx.get(requestRef);
+
+    if (requestSnap.exists) {
+      const saved = requestSnap.data()!;
+      if (saved.fingerprint !== fingerprint
+          || typeof saved.bookingId !== 'string') {
+        throw new HttpsError(
+          'failed-precondition',
+          'This request ID is already linked to different booking details.',
+        );
+      }
+      return saved.bookingId;
+    }
+
+    const now = Timestamp.now();
+    tx.create(bookingRef, {
+      customerId: auth.uid,
+      city,
+      pincode,
+      durationMinutes,
+      address: address.trim(),
+      petName: petName.trim(),
+      scheduledAt: startTimestamp,
+      endsAt: endTimestamp,
+      // Admin will assign a walker later.
+      walkerId: null,
+      assignedAt: null,
+      assignedBy: null,
+      status: 'confirmed',
+      confirmedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    tx.create(requestRef, {
+      bookingId: bookingRef.id,
+      fingerprint,
+      createdAt: now,
+    });
+
+    return bookingRef.id;
+  });
 
   return {
-    bookingId: ref.id,
+    bookingId,
     status: 'confirmed',
     message: 'Your booking is confirmed.',
   };
@@ -237,7 +280,7 @@ const createBookingDraftHandler: CallHandler = async (request) => {
 
 export const createBookingDraft = callable(createBookingDraftHandler);
 
-// Mumbai-region alias for customer app compatibility.
+// Mumbai-region endpoint used by the customer app.
 export const createBookingDraftMumbai =
   callableMumbai(createBookingDraftHandler);
 
