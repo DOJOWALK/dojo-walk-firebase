@@ -91,6 +91,7 @@ jobs:
             ],
             'admin-core': [
               'listAdminBookings',
+              'listAssignableWalkers',
               'assignWalkerToBooking',
               'listPendingWalkerApplications',
               'reviewWalkerApplication',
