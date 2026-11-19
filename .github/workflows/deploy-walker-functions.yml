@@ -140,7 +140,7 @@ jobs:
             firebase deploy \
               --only "functions:$FUNCTION" \
               --project dojo-platform-b68a3 \
-              --non-interactive \\
+              --non-interactive \
               --debug
 
             echo "Successfully deployed $FUNCTION"
