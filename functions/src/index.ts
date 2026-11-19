@@ -297,9 +297,28 @@ const getCustomerBookingsHandler: CallHandler = async (request) => {
     .limit(50)
     .get();
 
+  const walkerIds = [...new Set(
+    snap.docs
+      .map((doc) => doc.data().walkerId)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0),
+  )];
+
+  const walkerSnapshots = await Promise.all(
+    walkerIds.map((walkerId) => db.collection('walkers').doc(walkerId).get()),
+  );
+  const walkerNames = new Map(
+    walkerSnapshots.map((walkerSnap) => [
+      walkerSnap.id,
+      walkerSnap.exists ? walkerSnap.data()?.displayName ?? '' : '',
+    ]),
+  );
+
   return {
     bookings: snap.docs.map((doc) => {
       const data = doc.data();
+      const walkerId = typeof data.walkerId === 'string'
+        ? data.walkerId
+        : null;
 
       return {
         bookingId: doc.id,
@@ -311,7 +330,9 @@ const getCustomerBookingsHandler: CallHandler = async (request) => {
         scheduledAt: toIso(data.scheduledAt),
         endsAt: toIso(data.endsAt),
         status: data.status ?? 'unknown',
-        walkerId: data.walkerId ?? null,
+        walkerId,
+        walkerName: walkerId ? walkerNames.get(walkerId) ?? '' : null,
+        assignedAt: toIso(data.assignedAt),
         createdAt: toIso(data.createdAt),
       };
     }),
