@@ -32,7 +32,7 @@ jobs:
 
       - name: Verify deployment credential
         env:
-          FIREBASE_SERVICE_ACCOUNT: \${{ secrets.FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3 }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3 }}
         run: |
           if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
             echo "::error::Missing Firebase deployment credential"
@@ -42,7 +42,7 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: \${{ secrets.FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3 }}
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3 }}
           project_id: dojo-platform-b68a3
 
       - name: Set up Node.js
@@ -64,7 +64,7 @@ jobs:
       - name: Verify selected Functions
         id: targets
         env:
-          BATCH: \${{ inputs.batch }}
+          BATCH: ${{ inputs.batch }}
         run: |
           node <<'NODE'
           const fs = require('node:fs');
@@ -121,7 +121,7 @@ jobs:
 
       - name: Deploy Functions one by one
         env:
-          FUNCTIONS: \${{ steps.targets.outputs.functions }}
+          FUNCTIONS: ${{ steps.targets.outputs.functions }}
         run: |
           IFS=',' read -ra TARGETS <<< "$FUNCTIONS"
 
