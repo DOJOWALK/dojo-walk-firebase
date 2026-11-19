@@ -108,15 +108,15 @@ jobs:
 
           const missing = selected.filter(name => !actual.includes(name));
           if (missing.length) {
-            throw new Error(\`Missing exports: \${missing.join(', ')}\`);
+            throw new Error(`Missing exports: ${missing.join(', ')}`);
           }
 
           fs.appendFileSync(
             process.env.GITHUB_OUTPUT,
-            \`functions=\${selected.join(',')}\n\`
+            `functions=${selected.join(',')}\n`
           );
 
-          console.log(\`Selected \${selected.length} Functions.\`);
+          console.log(`Selected ${selected.length} Functions.`);
           NODE
 
       - name: Deploy Functions one by one
@@ -125,7 +125,7 @@ jobs:
         run: |
           IFS=',' read -ra TARGETS <<< "$FUNCTIONS"
 
-          for FUNCTION in "\${TARGETS[@]}"; do
+          for FUNCTION in "${TARGETS[@]}"; do
             echo "Deploying $FUNCTION"
 
             firebase deploy \
