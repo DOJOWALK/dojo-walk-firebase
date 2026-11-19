@@ -439,6 +439,55 @@ const listAdminBookingsHandler: CallHandler = async (request) => {
 export const listAdminBookings =
   callable(listAdminBookingsHandler);
 
+
+const listAssignableWalkersHandler: CallHandler = async (request) => {
+  requireAdmin(request);
+
+  const city = request.data?.city;
+  const pincode = request.data?.pincode;
+
+  if (typeof city !== 'string' || !walkerCityConfig.has(city)
+      || typeof pincode !== 'string' || !/^\\d{6}$/.test(pincode)) {
+    throw new HttpsError(
+      'invalid-argument',
+      'A valid city and 6-digit pincode are required.',
+    );
+  }
+
+  const snap = await db.collection('walkers')
+    .where('applicationStatus', '==', 'approved')
+    .get();
+
+  const walkers = snap.docs
+    .filter((doc) => {
+      const data = doc.data();
+      const serviceablePincodes = Array.isArray(data.serviceablePincodes)
+        ? data.serviceablePincodes
+        : [];
+
+      return data.active === true
+        && data.applicationCity === city
+        && (
+          data.applicationPincode === pincode
+          || serviceablePincodes.includes(pincode)
+        );
+    })
+    .map((doc) => {
+      const data = doc.data();
+      return {
+        walkerId: doc.id,
+        displayName: data.displayName ?? 'Walker',
+        city: data.applicationCity ?? '',
+        pincode: data.applicationPincode ?? '',
+      };
+    });
+
+  return { walkers };
+};
+
+export const listAssignableWalkers =
+  callable(listAssignableWalkersHandler);
+
 // ---------------------------------------------------------
 // ADMIN ASSIGNS WALKER
 // No availability or reservation check.
