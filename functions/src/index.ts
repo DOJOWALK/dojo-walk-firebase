@@ -166,7 +166,7 @@ const createBookingDraftHandler: CallHandler = async (request) => {
     );
   }
 
-  if (typeof pincode !== 'string' || !/^\\d{6}$/.test(pincode)) {
+  if (typeof pincode !== 'string' || !/^\d{6}$/.test(pincode)) {
     throw new HttpsError(
       'invalid-argument',
       'Enter a valid 6-digit pincode.',
