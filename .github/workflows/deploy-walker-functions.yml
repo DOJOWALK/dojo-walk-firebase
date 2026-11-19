@@ -13,6 +13,8 @@ on:
           - customer-booking
           - walker-mumbai
           - admin-core
+          - admin-walker-lookup
+          - admin-walker-assign
 
 permissions:
   contents: read
@@ -99,6 +101,12 @@ jobs:
               'setBookingPricing',
               'getAdminServiceAreas',
               'setAdminServiceArea'
+            ],
+            'admin-walker-lookup': [
+              'listAssignableWalkers'
+            ],
+            'admin-walker-assign': [
+              'assignWalkerToBooking'
             ]
           };
 
@@ -132,7 +140,9 @@ jobs:
             firebase deploy \
               --only "functions:$FUNCTION" \
               --project dojo-platform-b68a3 \
-              --non-interactive
+              --non-interactive \\
+              --debug
 
             echo "Successfully deployed $FUNCTION"
+            sleep 20
           done
