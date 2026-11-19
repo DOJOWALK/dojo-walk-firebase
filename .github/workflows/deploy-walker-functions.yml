@@ -1,4 +1,4 @@
-name: Deploy Walker Functions
+name: Deploy Backend Functions
 
 on:
   workflow_dispatch:
@@ -6,12 +6,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: dojo-walk-functions-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Verify deployment credential is configured
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3 }}
@@ -20,28 +26,57 @@ jobs:
             echo "::error::Missing repository secret FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3"
             exit 1
           fi
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3 }}
           project_id: dojo-platform-b68a3
-      - name: Set up Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+
       - name: Set up Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
       - name: Install Firebase CLI
         run: npm install --global firebase-tools
+
       - name: Install Functions dependencies
         working-directory: functions
-        run: npm install
+        run: npm install --no-audit --no-fund
+
       - name: Compile TypeScript
         working-directory: functions
         run: npm run build
-      - name: Deploy booking, customer, walker and admin operations functions (excluding payment functions)
+
+      - name: Verify and prepare exact exported Functions list
+        id: targets
+        env:
+          EXPECTED_FUNCTIONS: "getCustomerAccount,saveCustomerAccount,createBookingDraft,createBookingDraftMumbai,getCustomerBookings,cancelCustomerBooking,listAdminBookings,assignWalkerToBooking,submitWalkerApplication,submitWalkerApplicationMumbai,getWalkerApplication,getWalkerApplicationMumbai,saveWalkerAvailability,saveWalkerAvailabilityMumbai,updateWalkerBookingStatus,updateWalkerBookingStatusMumbai,getWalkerDashboard,getWalkerDashboardMumbai,listPendingWalkerApplications,reviewWalkerApplication,getBookingPricing,setBookingPricing,getAdminServiceAreas,setAdminServiceArea"
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const source = fs.readFileSync('functions/src/index.ts', 'utf8');
+          const actual = [...source.matchAll(/^export const ([A-Za-z0-9_]+)\\s*=/gm)]
+            .map((match) => match[1])
+            .sort();
+          const expected = process.env.EXPECTED_FUNCTIONS.split(',').sort();
+          const missing = expected.filter((name) => !actual.includes(name));
+          const unexpected = actual.filter((name) => !expected.includes(name));
+          if (missing.length || unexpected.length) {
+            console.error('Function deployment list does not match source exports.');
+            if (missing.length) console.error('Missing from source:', missing.join(', '));
+            if (unexpected.length) console.error('New exports not reviewed for deployment:', unexpected.join(', '));
+            process.exit(1);
+          }
+          const targets = expected.map((name) => `functions:${name}`).join(',');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `functions=${targets}\\n`);
+          console.log(`Validated ${expected.length} Functions exports.`);
+          NODE
+
+      - name: Deploy reviewed Customer, Walker and Admin Functions
         run: >-
           firebase deploy
-          --only functions:getCustomerAccount,functions:saveCustomerAccount,functions:createBookingDraft,functions:createBookingDraftMumbai,functions:getCustomerBookings,functions:cancelCustomerBooking,functions:listAdminBookings,functions:assignWalkerToBooking,functions:submitWalkerApplication,functions:submitWalkerApplicationMumbai,functions:getWalkerApplication,functions:getWalkerApplicationMumbai,functions:saveWalkerAvailability,functions:saveWalkerAvailabilityMumbai,functions:updateWalkerBookingStatus,functions:updateWalkerBookingStatusMumbai,functions:getWalkerDashboard,functions:getWalkerDashboardMumbai,functions:listPendingWalkerApplications,functions:reviewWalkerApplication,functions:getBookingPricing,functions:setBookingPricing,functions:getAdminServiceAreas,functions:setAdminServiceArea
+          --only "${{ steps.targets.outputs.functions }}"
           --project dojo-platform-b68a3
           --non-interactive
