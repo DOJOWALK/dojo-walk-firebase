@@ -6,12 +6,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: dojo-walk-firestore-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Verify deployment credential is configured
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3 }}
@@ -20,23 +26,27 @@ jobs:
             echo "::error::Missing repository secret FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3"
             exit 1
           fi
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DOJO_PLATFORM_B68A3 }}
           project_id: dojo-platform-b68a3
-      - name: Set up Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+
       - name: Set up Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
       - name: Install Firebase CLI
         run: npm install --global firebase-tools
+
       - name: Validate Firestore configuration files
         run: |
+          node -e "JSON.parse(require('node:fs').readFileSync('firebase.json', 'utf8'));"
+          node -e "JSON.parse(require('node:fs').readFileSync('firestore.indexes.json', 'utf8'));"
           test -s firestore.rules
-          test -s firestore.indexes.json
-          node -e "JSON.parse(require('fs').readFileSync('firestore.indexes.json', 'utf8'));"
+          node -e "const c=JSON.parse(require('node:fs').readFileSync('firebase.json','utf8')); if (!c.firestore || c.firestore.rules !== 'firestore.rules' || c.firestore.indexes !== 'firestore.indexes.json') process.exit(1);"
+
       - name: Deploy Firestore Rules and Indexes only
         run: firebase deploy --only firestore:rules,firestore:indexes --project dojo-platform-b68a3 --non-interactive
